@@ -1,0 +1,8 @@
+.*
+*.pyc
+*.o
+*.a
+build
+Makefile
+CMakeCache.txt
+CMakeUserPresets.json
