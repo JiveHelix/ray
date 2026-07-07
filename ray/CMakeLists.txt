@@ -4,7 +4,7 @@ if (${fPIC})
     set_property(TARGET ray PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif ()
 
-FindPackages(Tau)
+FindPackages(Tau Ceres)
 
 # Projects that include this project must #include "ray/<header-name>"
 target_include_directories(ray PUBLIC ${PROJECT_SOURCE_DIR})
@@ -12,7 +12,8 @@ target_include_directories(ray PUBLIC ${PROJECT_SOURCE_DIR})
 target_link_libraries(
     ray
     PUBLIC
-    tau::tau)
+    tau::tau
+    Ceres::ceres)
 
 target_sources(
     ray
@@ -21,7 +22,8 @@ target_sources(
     homography.cpp
     homography_settings.cpp
     named_vertex.cpp
-    pose.cpp)
+    pose.cpp
+    refine_intrinsics.cpp)
 
 
 install(TARGETS ray DESTINATION ${CMAKE_INSTALL_LIBDIR})

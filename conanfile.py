@@ -23,3 +23,4 @@ class RayConan(ConanFile):
     def requirements(self):
         self.requires("tau/[~1.15]", transitive_headers=True)
         self.requires("nlohmann_json/[~3]", transitive_headers=True)
+        self.requires("ceres-solver/[~2.2]", transitive_headers=True)
