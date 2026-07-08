@@ -5,6 +5,7 @@ add_catch2_test(
         extrinsics_tests.cpp
         homography_tests.cpp
         intrinsics_tests.cpp
+        normalize_tests.cpp
         projection_tests.cpp
     LINK
         ray)
