@@ -3,6 +3,7 @@
 
 #include <fields/fields.h>
 #include <tau/vector2d.h>
+#include <ray/normalize_pixel.h>
 
 
 namespace ray
@@ -19,21 +20,33 @@ struct NamedVertex
         fields::Field(&NamedVertex::pixel, "pixel"));
 
     static constexpr auto fieldsTypeName = "NamedVertex";
+
+    NamedVertex GetNormalized(const ray::NormalizePixel &normalizePixel) const;
 };
 
 
 DECLARE_OUTPUT_STREAM_OPERATOR(NamedVertex)
 
 
-using NamedVertices = std::vector<NamedVertex>;
+using PlanarVertices = std::vector<NamedVertex>;
 
 
-std::vector<tau::Point2d<double>> NamedVerticesToPixels(
-    const NamedVertices &namedVertices);
+PlanarVertices GetNormalized(
+    const ray::NormalizePixel &normalize,
+    const PlanarVertices &planarVertices);
 
 
-std::vector<tau::Point2d<size_t>> NamedVerticesToLogicals(
-    const NamedVertices &namedVertices);
+std::vector<PlanarVertices> GetNormalized(
+    const ray::NormalizePixel &normalize,
+    const std::vector<PlanarVertices> &planarVertices);
+
+
+std::vector<tau::Point2d<double>> PlanarVerticesToPixels(
+    const PlanarVertices &namedVertices);
+
+
+std::vector<tau::Point2d<size_t>> PlanarVerticesToLogicals(
+    const PlanarVertices &namedVertices);
 
 
 } // end namespace ray

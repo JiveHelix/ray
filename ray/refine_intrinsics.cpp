@@ -104,7 +104,7 @@ IntrinsicsMatrix ToIntrinsicsMatrix(const ReprojectionParameters &parameters)
 
 
 Eigen::Matrix<double, 3, 4> GetExtrinsics(
-    const HomographyMatrix &pixelHomography,
+    const HomographyMatrix &homography,
     const ReprojectionParameters &parameters)
 {
     using RotationMatrix = Eigen::Matrix<double, 3, 3>;
@@ -113,10 +113,10 @@ Eigen::Matrix<double, 3, 4> GetExtrinsics(
     auto intrinsicsInverse = ToIntrinsicsMatrix(parameters).inverse();
 
     Eigen::Vector3<double> first =
-        intrinsicsInverse * pixelHomography.col(0);
+        intrinsicsInverse * homography.col(0);
 
     Eigen::Vector3<double> second =
-        intrinsicsInverse * pixelHomography.col(1);
+        intrinsicsInverse * homography.col(1);
 
     double scale = 2.0 / (first.norm() + second.norm());
 
@@ -141,7 +141,7 @@ Eigen::Matrix<double, 3, 4> GetExtrinsics(
 
     Eigen::Matrix<double, 3, 4> result;
     result.block<3, 3>(0, 0) = rotation;
-    result.col(3) = scale * intrinsicsInverse * pixelHomography.col(2);
+    result.col(3) = scale * intrinsicsInverse * homography.col(2);
 
     return result;
 }
@@ -185,25 +185,6 @@ ReprojectionParameters ToReprojectionParameters(
 }
 
 
-
-HomographyMatrix ToPixelHomography(
-    const HomographyMatrix &normalizedHomography,
-    const tau::Size<double> &sensorSize)
-{
-    HomographyMatrix result = normalizedHomography;
-    double xScale = sensorSize.width / 2.0;
-    double yScale = sensorSize.height / 2.0;
-
-    result.row(0) =
-        xScale * (normalizedHomography.row(0) + normalizedHomography.row(2));
-
-    result.row(1) =
-        yScale * (normalizedHomography.row(1) + normalizedHomography.row(2));
-
-    return result;
-}
-
-
 // Return the angle axis representation of the rotation matrix.
 Eigen::Vector3<double> GetRotationVector(
     const Eigen::Matrix<double, 3, 3> &rotation)
@@ -231,11 +212,11 @@ Eigen::Matrix<double, 3, 3> GetRotationMatrix(
 
 
 ParameterVector GetInitialParameters(
-    const std::vector<HomographyMatrix> &pixelHomographies,
+    const std::vector<HomographyMatrix> &homographies,
     const IntrinsicsMatrix &intrinsics)
 {
-    assert(pixelHomographies.size() < std::numeric_limits<Eigen::Index>::max());
-    auto homographyCount = static_cast<Eigen::Index>(pixelHomographies.size());
+    assert(homographies.size() < std::numeric_limits<Eigen::Index>::max());
+    auto homographyCount = static_cast<Eigen::Index>(homographies.size());
 
     // The first nine parameters are shared camera parameters. Each board adds
     // one 3-value rotation-vector and one 3-value translation.
@@ -249,11 +230,11 @@ ParameterVector GetInitialParameters(
 
     auto cameraParameters = ToReprojectionParameters(result);
 
-    for (size_t i = 0; i < pixelHomographies.size(); ++i)
+    for (size_t i = 0; i < homographies.size(); ++i)
     {
         // Zhang's closed-form K gives a good first estimate for each board
         // pose, then the nonlinear pass lets those poses move with K and D.
-        auto extrinsics = GetExtrinsics(pixelHomographies[i], cameraParameters);
+        auto extrinsics = GetExtrinsics(homographies[i], cameraParameters);
 
         Eigen::Index offset = cameraParameterCount
             + (poseParameterCount * static_cast<Eigen::Index>(i));
@@ -285,9 +266,10 @@ double GetStep(double value, size_t index)
 
 
 Eigen::Vector<double, Eigen::Dynamic> GetReprojectionResiduals(
-    const std::vector<NamedVertices> &namedVertices,
+    const std::vector<PlanarVertices> &namedVertices,
     const World &world,
-    const ParameterVector &parameters)
+    const ParameterVector &parameters,
+    double unscale)
 {
     using Index = Eigen::Index;
 
@@ -345,7 +327,8 @@ Eigen::Vector<double, Eigen::Dynamic> GetReprojectionResiduals(
         }
     }
 
-    return result;
+    // The quantity I want to minimize is geometric error measured in pixels.
+    return result * unscale;
 }
 
 
@@ -368,7 +351,7 @@ double GetRmsResidual_pixels(
 
 CalibrationResult<double> Homography::RefineIntrinsics(
     const IntrinsicsMatrix &intrinsics,
-    const std::vector<NamedVertices> &namedVertices)
+    const std::vector<PlanarVertices> &namedVertices)
 {
     using Index = Eigen::Index;
 
@@ -389,26 +372,46 @@ CalibrationResult<double> Homography::RefineIntrinsics(
         throw RayError("Underdetermined reprojection vertices");
     }
 
-    std::vector<HomographyMatrix> pixelHomographies;
-    pixelHomographies.reserve(namedVertices.size());
+    std::vector<HomographyMatrix> homographies;
+    std::vector<PlanarVertices> validVertices;
+
+    homographies.reserve(namedVertices.size());
+    validVertices.reserve(namedVertices.size());
 
     for (const auto &vertices: namedVertices)
     {
-        pixelHomographies.push_back(
-            ToPixelHomography(
-                this->GetHomographyMatrix(vertices),
-                this->sensorSize_));
+        if (vertices.size() < 4)
+        {
+            continue;
+        }
+
+        try
+        {
+            homographies.push_back(this->GetHomographyMatrix(vertices));
+        }
+        catch (RayError &)
+        {
+            continue;
+        }
+
+        validVertices.push_back(vertices);
+    }
+
+    if (homographies.size() < 2)
+    {
+        throw RayError("Insufficient homographies for optimization.");
     }
 
     ParameterVector parameters =
-        GetInitialParameters(pixelHomographies, intrinsics);
+        GetInitialParameters(homographies, intrinsics);
 
     double damping = 1e-3;
 
     auto residuals = GetReprojectionResiduals(
-        namedVertices,
+        validVertices,
         this->world_,
-        parameters);
+        parameters,
+        this->normalize_.GetUnscale());
 
     double error = residuals.squaredNorm();
 
@@ -436,9 +439,10 @@ CalibrationResult<double> Homography::RefineIntrinsics(
             trial(parameterIndex) += step;
 
             auto trialResiduals = GetReprojectionResiduals(
-                namedVertices,
+                validVertices,
                 this->world_,
-                trial);
+                trial,
+                this->normalize_.GetUnscale());
 
             jacobian.col(parameterIndex) = (trialResiduals - residuals) / step;
         }
@@ -466,9 +470,10 @@ CalibrationResult<double> Homography::RefineIntrinsics(
         trial(0) = std::max(trial(0), 1.0);
 
         auto trialResiduals = GetReprojectionResiduals(
-            namedVertices,
+            validVertices,
             this->world_,
-            trial);
+            trial,
+            this->normalize_.GetUnscale());
 
         double trialError = trialResiduals.squaredNorm();
 
@@ -500,9 +505,9 @@ CalibrationResult<double> Homography::RefineIntrinsics(
     return {
         Intrinsics<double>::FromArray_pixels(
             this->settings_.pixelSize_microns,
-            intrinsicsMatrix),
+            this->normalize_.ToPixels(intrinsicsMatrix)),
         reprojectionParameters.distortion,
-        GetRmsResidual_pixels(residuals)};
+        this->normalize_.Unscale(GetRmsResidual_pixels(residuals))};
 }
 
 

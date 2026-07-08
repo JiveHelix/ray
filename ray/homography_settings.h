@@ -39,7 +39,7 @@ struct HomographySettings: public HomographyTemplate<pex::Identity>
 {
     static constexpr tau::Size<double> defaultImageSize{1920, 1080};
     static constexpr double defaultPixelSize = 10.0;
-    static constexpr double defaultSquareSize = 25.0;
+    static constexpr double defaultSquareSize = 150.0;
 
     HomographySettings()
         :

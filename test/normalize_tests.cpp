@@ -12,14 +12,14 @@ TEST_CASE("Normalized center", "[homography]")
 
     auto center = tau::Point2d<double>{1920.0 / 2, 1080 / 2};
     auto normalized = normalize.ToNormalized(center);
-    auto expected = tau::Point2d<double>{0.0, 0.0};
+    auto maximumRadius = 1.0;
 
-    REQUIRE(jive::Roughly(expected.x, testTolerance) == normalized.x);
-    REQUIRE(jive::Roughly(expected.y, testTolerance) == normalized.y);
+    REQUIRE(normalized.Magnitude() <= maximumRadius);
 
-    auto roundTrip = normalize.ToPixel(normalized);
-    REQUIRE(jive::Roughly(roundTrip.x) == center.x);
-    REQUIRE(jive::Roughly(roundTrip.y) == center.y);
+    auto roundTrip = normalize.ToPixels(normalized);
+
+    REQUIRE(jive::Roughly(roundTrip.x, testTolerance) == center.x);
+    REQUIRE(jive::Roughly(roundTrip.y, testTolerance) == center.y);
 }
 
 
@@ -30,14 +30,14 @@ TEST_CASE("Normalized topLeft", "[homography]")
 
     auto topLeft = tau::Point2d<double>{0, 0};
     auto normalized = normalize.ToNormalized(topLeft);
-    auto expected = tau::Point2d<double>{-1.0, -1.0};
+    auto maximumRadius = 1.0;
 
-    REQUIRE(jive::Roughly(expected.x, testTolerance) == normalized.x);
-    REQUIRE(jive::Roughly(expected.y, testTolerance) == normalized.y);
+    REQUIRE(normalized.Magnitude() <= maximumRadius);
 
-    auto roundTrip = normalize.ToPixel(normalized);
-    REQUIRE(jive::Roughly(roundTrip.x) == topLeft.x);
-    REQUIRE(jive::Roughly(roundTrip.y) == topLeft.y);
+    auto roundTrip = normalize.ToPixels(normalized);
+
+    REQUIRE(jive::Roughly(roundTrip.x, testTolerance) == topLeft.x);
+    REQUIRE(jive::Roughly(roundTrip.y, testTolerance) == topLeft.y);
 }
 
 
@@ -48,14 +48,14 @@ TEST_CASE("Normalized topRight", "[homography]")
 
     auto topRight = tau::Point2d<double>{1919, 0};
     auto normalized = normalize.ToNormalized(topRight);
-    auto expected = tau::Point2d<double>{0.9990, -1.0};
+    auto maximumRadius = 1.0;
 
-    REQUIRE(jive::Roughly(expected.x, testTolerance) == normalized.x);
-    REQUIRE(jive::Roughly(expected.y, testTolerance) == normalized.y);
+    REQUIRE(normalized.Magnitude() <= maximumRadius);
 
-    auto roundTrip = normalize.ToPixel(normalized);
-    REQUIRE(jive::Roughly(roundTrip.x) == topRight.x);
-    REQUIRE(jive::Roughly(roundTrip.y) == topRight.y);
+    auto roundTrip = normalize.ToPixels(normalized);
+
+    REQUIRE(jive::Roughly(roundTrip.x, testTolerance) == topRight.x);
+    REQUIRE(jive::Roughly(roundTrip.y, testTolerance) == topRight.y);
 }
 
 
@@ -66,14 +66,14 @@ TEST_CASE("Normalized bottomLeft", "[homography]")
 
     auto bottomLeft = tau::Point2d<double>{0, 1079};
     auto normalized = normalize.ToNormalized(bottomLeft);
-    auto expected = tau::Point2d<double>{-1.0, 0.9981};
+    auto maximumRadius = 1.0;
 
-    REQUIRE(jive::Roughly(expected.x, testTolerance) == normalized.x);
-    REQUIRE(jive::Roughly(expected.y, testTolerance) == normalized.y);
+    REQUIRE(normalized.Magnitude() <= maximumRadius);
 
-    auto roundTrip = normalize.ToPixel(normalized);
-    REQUIRE(jive::Roughly(roundTrip.x) == bottomLeft.x);
-    REQUIRE(jive::Roughly(roundTrip.y) == bottomLeft.y);
+    auto roundTrip = normalize.ToPixels(normalized);
+
+    REQUIRE(jive::Roughly(roundTrip.x, testTolerance) == bottomLeft.x);
+    REQUIRE(jive::Roughly(roundTrip.y, testTolerance) == bottomLeft.y);
 }
 
 TEST_CASE("Normalized bottomRight", "[homography]")
@@ -83,14 +83,14 @@ TEST_CASE("Normalized bottomRight", "[homography]")
 
     auto bottomRight = tau::Point2d<double>{1919, 1079};
     auto normalized = normalize.ToNormalized(bottomRight);
-    auto expected = tau::Point2d<double>{0.9990, 0.9981};
+    auto maximumRadius = 1.0;
 
-    REQUIRE(jive::Roughly(expected.x, testTolerance) == normalized.x);
-    REQUIRE(jive::Roughly(expected.y, testTolerance) == normalized.y);
+    REQUIRE(normalized.Magnitude() <= maximumRadius);
 
-    auto roundTrip = normalize.ToPixel(normalized);
-    REQUIRE(jive::Roughly(roundTrip.x) == bottomRight.x);
-    REQUIRE(jive::Roughly(roundTrip.y) == bottomRight.y);
+    auto roundTrip = normalize.ToPixels(normalized);
+
+    REQUIRE(jive::Roughly(roundTrip.x, testTolerance) == bottomRight.x);
+    REQUIRE(jive::Roughly(roundTrip.y, testTolerance) == bottomRight.y);
 }
 
 

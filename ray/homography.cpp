@@ -66,7 +66,9 @@ Eigen::Matrix<double, 2, 9>
 Homography::GetHomographyFactors(const NamedVertex &vertex)
 {
     auto world = this->world_(vertex.logical);
-    auto sensor = this->normalize_(vertex.pixel);
+
+    // vertex should have been pre-normalized
+    auto sensor = vertex.pixel;
 
     return tau::Matrix<2, 9, double>(
         // The factors dependent on sensor x coordinates
@@ -113,39 +115,96 @@ Homography::Factors Homography::CombineHomographyFactors(
 HomographyMatrix Homography::GetHomographyMatrix(
     const std::vector<NamedVertex> &vertices)
 {
+    if (vertices.size() < 4)
+    {
+        throw RayError("Homography has insufficient vertices.");
+    }
+
     auto factors = this->CombineHomographyFactors(vertices);
 
+    using Svd = Eigen::JacobiSVD<Homography::Factors>;
+
+    Svd svd(factors, Eigen::ComputeFullV);
+
+    // Svd must have rank 8 for homography to be uniquely determined.
+    if (svd.rank() < 8)
+    {
+        throw RayError("Homography is not uniquely determined");
+    }
+
+    // The homography is in the last column of V.
     HomographyMatrix homographyMatrix =
-        tau::SvdSolve(factors).reshaped<Eigen::RowMajor>(3, 3);
+        svd.matrixV().col(svd.matrixV().cols() - 1)
+            .reshaped<Eigen::RowMajor>(3, 3);
 
     return homographyMatrix;
 }
 
 
 IntrinsicsMatrix Homography::EstimateIntrinsics(
-    const std::vector<NamedVertices> &namedVertices)
+    const std::vector<PlanarVertices> &namedVertices)
 {
     if (namedVertices.size() < 3)
     {
         throw RayError("Underdetermined vertices");
     }
 
-    using ConstrainedFactorGroup = Eigen::Matrix<double, Eigen::Dynamic, 6>;
+    std::vector<HomographyMatrix> validHomographies;
+
+    for (auto i: jive::Range<size_t>(0, namedVertices.size()))
+    {
+        const auto &vertices = namedVertices[i];
+
+        if (vertices.size() < 4)
+        {
+            std::cerr << "Plane " << i << " has insufficient points."
+                << std::endl;
+
+            continue;
+        }
+
+        try
+        {
+            validHomographies.push_back(
+                this->GetHomographyMatrix(vertices));
+        }
+        catch (RayError &)
+        {
+            std::cerr << "Solution " << i
+                << " did not have a uniquely determined homography."
+                << std::endl;
+        }
+    }
 
     Eigen::Index solutionCount =
-        static_cast<Eigen::Index>(namedVertices.size());
+        static_cast<Eigen::Index>(validHomographies.size());
+
+    if (solutionCount < 3)
+    {
+        throw RayError("Insufficient uniquely determined vertices");
+    }
+
+    using ConstrainedFactorGroup = Eigen::Matrix<double, Eigen::Dynamic, 6>;
 
     ConstrainedFactorGroup factors(2 * solutionCount, 6);
 
     for (auto i: jive::Range<Eigen::Index>(0, solutionCount))
     {
-        const auto &vertices = namedVertices[static_cast<size_t>(i)];
-
-        factors.block<2, 6>(2 * i, 0) = GetConstrainedFactors(
-            this->GetHomographyMatrix(vertices));
+        const auto &homography = validHomographies[static_cast<size_t>(i)];
+        factors.block<2, 6>(2 * i, 0) = GetConstrainedFactors(homography);
     }
 
-    Eigen::Vector<double, 6> solution = tau::SvdSolve(factors);
+    using Svd = Eigen::JacobiSVD<ConstrainedFactorGroup>;
+    Svd svd(factors, Eigen::ComputeFullV);
+
+    // Solving for intrinsics requires at minimum rank 5.
+    if (svd.rank() < 5)
+    {
+        throw RayError("Intrinsics is not uniquely determined");
+    }
+
+    Eigen::Vector<double, 6> solution =
+        svd.matrixV().col(svd.matrixV().cols() - 1);
 
     using Beta = Eigen::Matrix<double, 3, 3>;
 
@@ -178,14 +237,20 @@ IntrinsicsMatrix Homography::EstimateIntrinsics(
     // Canonicalize the intrinsics matrix by forcing K_33 to be 1.
     intrinsics.array() /= intrinsics(2, 2);
 
-    const auto &n = this->normalize_;
-
-    intrinsics(0, 0) = n.Unscale(intrinsics(0, 0), true);
-    intrinsics(1, 1) = n.Unscale(intrinsics(1, 1), false);
-    intrinsics(0, 2) = n.ToPixel(intrinsics(0, 2), true);
-    intrinsics(1, 2) = n.ToPixel(intrinsics(1, 2), false);
-
     return intrinsics;
+}
+
+
+CalibrationResult<double> Homography::Calibrate(
+    const std::vector<PlanarVertices> &namedVertices)
+{
+    // Normalize pixel coordinates of all vertices
+    std::vector<PlanarVertices> normalizedVertices =
+        GetNormalized(this->normalize_, namedVertices);
+
+    auto estimated = this->EstimateIntrinsics(normalizedVertices);
+
+    return this->RefineIntrinsics(estimated, normalizedVertices);
 }
 
 

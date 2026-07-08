@@ -5,7 +5,7 @@
 #include <tau/vector2d.h>
 
 
-namespace tau
+namespace ray
 {
 
 
@@ -14,9 +14,21 @@ class NormalizePixel
 public:
     NormalizePixel(const tau::Size<double> &sensorSize)
         :
-        sensorSize_(sensorSize)
-    {
+        scale_(
+            std::sqrt(2.0)
+            / std::max(sensorSize.width, sensorSize.height)),
 
+        unscale_(1.0 / this->scale_),
+
+        transform_(),
+        inverse_()
+    {
+        this->transform_ <<
+            this->scale_, 0.0, -this->scale_ * sensorSize.width / 2.0,
+            0.0, this->scale_, -this->scale_ * sensorSize.height / 2.0,
+            0.0, 0.0, 1.0;
+
+        this->inverse_ = this->transform_.inverse();
     }
 
     tau::Point2d<double> operator()(const tau::Point2d<double> &pixel) const
@@ -26,57 +38,56 @@ public:
 
     tau::Point2d<double> ToNormalized(const tau::Point2d<double> &pixel) const
     {
-        // Scale from 0 to 2.
-        tau::Point2d<double> result = pixel * 2 / this->sensorSize_;
+        Eigen::Vector3d normalized =
+            this->transform_ * pixel.GetHomogeneous();
 
-        // Shift center point to 0.
-        return result - 1;
+        return tau::Point2d<double>(normalized.head<2>());
     }
 
-    tau::Point2d<double> ToPixel(const tau::Point2d<double> &normalized) const
+    tau::Point2d<double> ToPixels(const tau::Point2d<double> &normalized) const
     {
-        tau::Point2d<double> unshifted = normalized;
+        Eigen::Vector3d unscaled = this->inverse_ * normalized.GetHomogeneous();
 
-        // Shift center point back to 1, 1
-        unshifted += 1;
-
-        // Scale back to sensor size.
-        return unshifted * this->sensorSize_ / 2.0;
+        return tau::Point2d<double>(unscaled.head<2>());
     }
 
-    double ToPixel(double normalized, bool isX) const
+    // Scale/Unscale do not shift by 1.
+    double Unscale(double normalized) const
     {
-        double unshifted = normalized;
-
-        // Shift center point back to 1, 1
-        unshifted += 1;
-
-        // Scale back to sensor size.
-        if (isX)
-        {
-            return unshifted * this->sensorSize_.width / 2.0;
-        }
-        else
-        {
-            return unshifted * this->sensorSize_.height / 2.0;
-        }
+        return normalized * this->unscale_;
     }
 
-    double Unscale(double normalized, bool isX) const
+    double GetUnscale() const
     {
-        if (isX)
-        {
-            return normalized * this->sensorSize_.width / 2.0;
-        }
-        else
-        {
-            return normalized * this->sensorSize_.height / 2.0;
-        }
+        return this->unscale_;
+    }
+
+    double GetScale() const
+    {
+        return this->scale_;
+    }
+
+    double Scale(double pixel) const
+    {
+        return pixel * this->scale_;
+    }
+
+    Eigen::Matrix3d ToNormalized(const Eigen::Matrix3d &intrinsics) const
+    {
+        return this->transform_ * intrinsics;
+    }
+
+    Eigen::Matrix3d ToPixels(const Eigen::Matrix3d &intrinsics) const
+    {
+        return this->inverse_ * intrinsics;
     }
 
 private:
-    tau::Size<double> sensorSize_;
+    double scale_;
+    double unscale_;
+    Eigen::Matrix3d transform_;
+    Eigen::Matrix3d inverse_;
 };
 
 
-} // end namespace tau
+} // end namespace ray

@@ -6,8 +6,52 @@ namespace ray
 {
 
 
-std::vector<tau::Point2d<double>> NamedVerticesToPixels(
-    const NamedVertices &namedVertices)
+NamedVertex NamedVertex::GetNormalized(
+    const ray::NormalizePixel &normalizePixel) const
+{
+    NamedVertex result;
+
+    // The logical vertex is not normalized.
+    result.logical = this->logical;
+
+    result.pixel = normalizePixel(this->pixel);
+
+    return result;
+}
+
+
+PlanarVertices GetNormalized(
+    const ray::NormalizePixel &normalize,
+    const PlanarVertices &planarVertices)
+{
+    PlanarVertices result;
+
+    for (const auto &vertex: planarVertices)
+    {
+        result.push_back(vertex.GetNormalized(normalize));
+    }
+
+    return result;
+}
+
+
+std::vector<PlanarVertices> GetNormalized(
+    const ray::NormalizePixel &normalize,
+    const std::vector<PlanarVertices> &planarVertices)
+{
+    std::vector<PlanarVertices> result;
+
+    for (const auto &vertices: planarVertices)
+    {
+        result.push_back(GetNormalized(normalize, vertices));
+    }
+
+    return result;
+}
+
+
+std::vector<tau::Point2d<double>> PlanarVerticesToPixels(
+    const PlanarVertices &namedVertices)
 {
     std::vector<tau::Point2d<double>> pixels;
     pixels.reserve(namedVertices.size());
@@ -25,8 +69,8 @@ std::vector<tau::Point2d<double>> NamedVerticesToPixels(
 }
 
 
-std::vector<tau::Point2d<size_t>> NamedVerticesToLogicals(
-    const NamedVertices &namedVertices)
+std::vector<tau::Point2d<size_t>> PlanarVerticesToLogicals(
+    const PlanarVertices &namedVertices)
 {
     std::vector<tau::Point2d<size_t>> logicals;
     logicals.reserve(namedVertices.size());

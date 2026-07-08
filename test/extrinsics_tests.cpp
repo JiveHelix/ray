@@ -34,32 +34,6 @@ TEST_CASE("Pose origin projection", "[pose]")
     auto expected = tau::Line3d<float>({0_f, 0_f, 0_f}, {1_f, 0_f, 0_f});
 
     REQUIRE(lineFromWorld.IsColinear(expected));
-
-    auto lowerPixel = Pixel{1920_f / 2_f, 1079};
-
-    std::cout << "lowerPixel: "
-        << projectionFromWorld.GetLine(lowerPixel).GetAngleAboutY()
-        << std::endl;
-
-    auto upperPixel = Pixel{1920_f / 2_f, 0};
-
-    std::cout << "upperPixel: "
-        << projectionFromWorld.GetLine(upperPixel).GetAngleAboutY()
-        << std::endl;
-
-    auto leftPixel = Pixel{0_f, 1080_f / 2_f};
-
-    std::cout << "leftPixel: "
-        << projectionFromWorld.GetLine_m(leftPixel).GetAngleAboutZ()
-        << std::endl;
-
-    auto rightPixel = Pixel{1919_f, 1080_f / 2_f};
-
-    std::cout << "rightPixel: "
-        << projectionFromWorld.GetLine_m(rightPixel).GetAngleAboutZ()
-        << std::endl;
-
-    // TODO Add a REQUIRE
 }
 
 

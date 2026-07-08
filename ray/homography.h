@@ -1,7 +1,7 @@
 #pragma once
 
 
-#include <tau/normalize_pixel.h>
+#include <ray/normalize_pixel.h>
 #include <ray/lens_calibration.h>
 #include <ray/named_vertex.h>
 #include <ray/homography_settings.h>
@@ -60,22 +60,30 @@ public:
 
     using Factors = Eigen::Matrix<double, Eigen::Dynamic, 9>;
 
-    Factors CombineHomographyFactors(const NamedVertices &vertices);
+    Factors CombineHomographyFactors(const PlanarVertices &vertices);
 
-    HomographyMatrix GetHomographyMatrix(const NamedVertices &vertices);
+    HomographyMatrix GetHomographyMatrix(const PlanarVertices &vertices);
 
     IntrinsicsMatrix EstimateIntrinsics(
-        const std::vector<NamedVertices> &namedVertices);
+        const std::vector<PlanarVertices> &namedVertices);
 
     CalibrationResult<double> RefineIntrinsics(
         const IntrinsicsMatrix &intrinsics,
-        const std::vector<NamedVertices> &namedVertices);
+        const std::vector<PlanarVertices> &namedVertices);
+
+    CalibrationResult<double> Calibrate(
+        const std::vector<PlanarVertices> &namedVertices);
+
+    const ray::NormalizePixel & GetNormalizePixel() const
+    {
+        return this->normalize_;
+    }
 
 private:
     HomographySettings settings_;
     World world_;
     tau::Size<double> sensorSize_;
-    tau::NormalizePixel normalize_;
+    ray::NormalizePixel normalize_;
 };
 
 
