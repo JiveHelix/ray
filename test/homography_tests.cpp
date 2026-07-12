@@ -67,10 +67,7 @@ ray::PlanarVertices CreatePlanarVertices(
 
             auto point = tau::Point2d<double>(camera.template head<2>());
 
-            auto distorted =
-                ray::distortion::DistortPoint(
-                    distortion,
-                    point);
+            auto distorted = distortion.Apply(point);
 
             Eigen::Vector3<double> projected =
                 intrinsicsArray

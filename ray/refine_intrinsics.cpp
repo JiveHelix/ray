@@ -10,68 +10,20 @@ namespace
 {
 
 
-constexpr Eigen::Index cameraParameterCount = 9;
-constexpr Eigen::Index poseParameterCount = 6;
+using Eigen::Index;
 
 
-#if 0
-struct ReprojectionResidual
-{
-private:
-    tau::Point2d<double> world_;
-    tau::Point2d<double> observed_pixels_;
-
-public:
-    ReprojectionResidual(
-        const tau::Point2d<double> &world,
-        const tau::Point2d<double> &observed_pixels)
-        :
-        world_(world),
-        observed_pixels_(observed_pixels)
-    {
-
-    }
-
-    template<typename T>
-    bool operator()(
-        const T *camera,
-        const T *pose,
-        T *residuals) const
-    {
+constexpr Index cameraParameterCount = 9;
+constexpr Index poseParameterCount = 6;
 
 
-
-        distortion::BrownConrady<T> distortion;
-
-        distortion.k1 = parameters[0];
-        distortion.k2 = parameters[1];
-        distortion.p1 = parameters[2];
-        distortion.p2 = parameters[3];
-        distortion.k3 = parameters[4];
-
-        tau::Point2d<T> idealAsT = this->ideal.template Cast<T>();
-
-        tau::Point2d<T> predicted =
-            distortion::DistortPoint(distortion, idealAsT);
-
-        residuals[0] = predicted.x - T(measured.x);
-        residuals[1] = predicted.y - T(measured.y);
-
-        return true;
-    }
-};
-#endif
-
-
-using ParameterVector = Eigen::Vector<double, Eigen::Dynamic>;
+using Eigen::VectorXd;
+using Eigen::MatrixXd;
 
 
 struct ReprojectionParameters
 {
-    double fx;
-    double fy;
-    double cx;
-    double cy;
+    IntrinsicsMatrix intrinsics;
     distortion::BrownConrady<double> distortion;
 };
 
@@ -80,37 +32,27 @@ ReprojectionParameters ToReprojectionParameters(
     const IntrinsicsMatrix &intrinsics)
 {
     return {
-        intrinsics(0, 0),
-        intrinsics(1, 1),
-        intrinsics(0, 2),
-        intrinsics(1, 2),
+        intrinsics,
         {}};
 }
 
 
 IntrinsicsMatrix ToIntrinsicsMatrix(const ReprojectionParameters &parameters)
 {
-    IntrinsicsMatrix result = IntrinsicsMatrix::Identity();
-
-    result(0, 0) = parameters.fx;
-    result(1, 1) = parameters.fy;
-    result(0, 2) = parameters.cx;
-    result(1, 2) = parameters.cy;
-
     assert(result(0, 1) == 0.0);
 
-    return result;
+    return parameters.intrinsics;
 }
 
 
 Eigen::Matrix<double, 3, 4> GetExtrinsics(
     const HomographyMatrix &homography,
-    const ReprojectionParameters &parameters)
+    const IntrinsicsMatrix &intrinsics)
 {
     using RotationMatrix = Eigen::Matrix<double, 3, 3>;
     using RotationColumns = Eigen::Matrix<double, 3, 2>;
 
-    auto intrinsicsInverse = ToIntrinsicsMatrix(parameters).inverse();
+    auto intrinsicsInverse = intrinsics.inverse();
 
     Eigen::Vector3<double> first =
         intrinsicsInverse * homography.col(0);
@@ -147,17 +89,26 @@ Eigen::Matrix<double, 3, 4> GetExtrinsics(
 }
 
 
-ParameterVector ToVector(const ReprojectionParameters &parameters)
+VectorXd ToVector(const ReprojectionParameters &parameters)
 {
-    ParameterVector result(cameraParameterCount);
+    VectorXd result(cameraParameterCount);
 
+    const auto &intrinsics = parameters.intrinsics;
     const auto &distortion = parameters.distortion;
 
     result <<
-        parameters.fx,
-        parameters.fy,
-        parameters.cx,
-        parameters.cy,
+        // fx
+        parameters.intrinsics(0, 0),
+
+        // fy
+        parameters.intrinsics(1, 1),
+
+        // cx
+        parameters.intrinsics(0, 2),
+
+        // cy
+        parameters.intrinsics(1, 2),
+
         distortion.k1,
         distortion.k2,
         distortion.p1,
@@ -169,13 +120,16 @@ ParameterVector ToVector(const ReprojectionParameters &parameters)
 
 
 ReprojectionParameters ToReprojectionParameters(
-    const ParameterVector &parameters)
+    const VectorXd &parameters)
 {
+    IntrinsicsMatrix intrinsics = IntrinsicsMatrix::Identity();
+    intrinsics(0, 0) = parameters(0);
+    intrinsics(1, 1) = parameters(1);
+    intrinsics(0, 2) = parameters(2);
+    intrinsics(1, 2) = parameters(3);
+
     return {
-        parameters(0),
-        parameters(1),
-        parameters(2),
-        parameters(3),
+        intrinsics,
         {
             parameters(4),
             parameters(5),
@@ -211,37 +165,40 @@ Eigen::Matrix<double, 3, 3> GetRotationMatrix(
 }
 
 
-ParameterVector GetInitialParameters(
-    const std::vector<HomographyMatrix> &homographies,
-    const IntrinsicsMatrix &intrinsics)
+VectorXd GetInitialParameters(
+    const IntrinsicsMatrix &intrinsics,
+    const std::vector<HomographyMatrix> &homographies)
 {
-    assert(homographies.size() < std::numeric_limits<Eigen::Index>::max());
-    auto homographyCount = static_cast<Eigen::Index>(homographies.size());
+    assert(homographies.size() < std::numeric_limits<Index>::max());
+    auto homographyCount = static_cast<Index>(homographies.size());
 
     // The first nine parameters are shared camera parameters. Each board adds
     // one 3-value rotation-vector and one 3-value translation.
     auto parameterCount =
         cameraParameterCount + (poseParameterCount * homographyCount);
 
-    ParameterVector result(parameterCount);
+    VectorXd result(parameterCount);
 
+    // Initial the intrinsics/distortion portion of the parameter vector.
     result.head(cameraParameterCount) =
         ToVector(ToReprojectionParameters(intrinsics));
 
-    auto cameraParameters = ToReprojectionParameters(result);
-
+    // Initialize the rotation/translation vectors associated with each board
+    // view.
     for (size_t i = 0; i < homographies.size(); ++i)
     {
         // Zhang's closed-form K gives a good first estimate for each board
         // pose, then the nonlinear pass lets those poses move with K and D.
-        auto extrinsics = GetExtrinsics(homographies[i], cameraParameters);
+        auto extrinsics = GetExtrinsics(homographies[i], intrinsics);
 
-        Eigen::Index offset = cameraParameterCount
-            + (poseParameterCount * static_cast<Eigen::Index>(i));
+        Index offset = cameraParameterCount
+            + (poseParameterCount * static_cast<Index>(i));
 
+        // The full rotation is represented by an angle-axis vector.
         result.segment<3>(offset) =
             GetRotationVector(extrinsics.block<3, 3>(0, 0));
 
+        // Translation lives in the 4th column
         result.segment<3>(offset + 3) = extrinsics.col(3);
     }
 
@@ -253,26 +210,36 @@ double GetStep(double value, size_t index)
 {
     if (index < 4)
     {
+        // fx, fy, cx, cy
         return std::max(1e-3, std::abs(value) * 1e-6);
     }
 
     if (index < cameraParameterCount)
     {
+        // Distortion parameters.
         return std::max(1e-8, std::abs(value) * 1e-4);
     }
 
-    return std::max(1e-8, std::abs(value) * 1e-4);
+    size_t poseIndex =
+        (index - cameraParameterCount) % poseParameterCount;
+
+    if (poseIndex < 3)
+    {
+        // Rotation vector, radians.
+        return std::max(1e-6, std::abs(value) * 1e-5);
+    }
+
+    // Translation, meters.
+    return std::max(1e-6, std::abs(value) * 1e-6);
 }
 
 
-Eigen::Vector<double, Eigen::Dynamic> GetReprojectionResiduals(
+VectorXd GetReprojectionResiduals(
     const std::vector<PlanarVertices> &namedVertices,
     const World &world,
-    const ParameterVector &parameters,
+    const VectorXd &parameters,
     double unscale)
 {
-    using Index = Eigen::Index;
-
     ReprojectionParameters cameraParameters =
         ToReprojectionParameters(parameters);
 
@@ -283,7 +250,7 @@ Eigen::Vector<double, Eigen::Dynamic> GetReprojectionResiduals(
         pointCount += static_cast<Index>(vertices.size());
     }
 
-    Eigen::Vector<double, Eigen::Dynamic> result(2 * pointCount);
+    VectorXd result(2 * pointCount);
     Index row{};
 
     for (size_t i = 0; i < namedVertices.size(); ++i)
@@ -311,19 +278,17 @@ Eigen::Vector<double, Eigen::Dynamic> GetReprojectionResiduals(
             // and lens distortion.
             camera.array() /= camera(2);
 
-            auto distorted =
-                distortion::DistortPoint(
-                    cameraParameters.distortion,
-                    tau::Point2d<double>(camera.template head<2>()));
+            auto distorted = cameraParameters.distortion.Apply(
+                tau::Point2d<double>(camera.template head<2>()));
 
-            double predictedX =
-                cameraParameters.fx * distorted.x + cameraParameters.cx;
+            Eigen::Vector3d predicted =
+                cameraParameters.intrinsics * distorted.GetHomogeneous();
 
-            double predictedY =
-                cameraParameters.fy * distorted.y + cameraParameters.cy;
+            auto residual =
+                predicted.head<2>().array() - vertex.pixel.ToEigen().array();
 
-            result(row++) = predictedX - vertex.pixel.x;
-            result(row++) = predictedY - vertex.pixel.y;
+            result(row++) = residual(0);
+            result(row++) = residual(1);
         }
     }
 
@@ -333,7 +298,7 @@ Eigen::Vector<double, Eigen::Dynamic> GetReprojectionResiduals(
 
 
 double GetRmsResidual_pixels(
-    const Eigen::Vector<double, Eigen::Dynamic> &residuals)
+    const VectorXd &residuals)
 {
     if (residuals.size() == 0)
     {
@@ -353,25 +318,6 @@ CalibrationResult<double> Homography::RefineIntrinsics(
     const IntrinsicsMatrix &intrinsics,
     const std::vector<PlanarVertices> &namedVertices)
 {
-    using Index = Eigen::Index;
-
-    Index pointCount{};
-
-    for (const auto &vertices: namedVertices)
-    {
-        pointCount += static_cast<Index>(vertices.size());
-    }
-
-    // There is one camera, and there are namedVertices.size() views of the
-    // chess board.
-    Index parameterCount = cameraParameterCount
-        + (poseParameterCount * static_cast<Index>(namedVertices.size()));
-
-    if (2 * pointCount <= parameterCount)
-    {
-        throw RayError("Underdetermined reprojection vertices");
-    }
-
     std::vector<HomographyMatrix> homographies;
     std::vector<PlanarVertices> validVertices;
 
@@ -402,8 +348,30 @@ CalibrationResult<double> Homography::RefineIntrinsics(
         throw RayError("Insufficient homographies for optimization.");
     }
 
-    ParameterVector parameters =
-        GetInitialParameters(homographies, intrinsics);
+    if (homographies.size() != validVertices.size())
+    {
+        throw std::logic_error("Unexpected validVertices size");
+    }
+
+    Index pointCount{};
+
+    for (const auto &vertices: validVertices)
+    {
+        pointCount += static_cast<Index>(vertices.size());
+    }
+
+    // There is one camera, and there are validVertices.size() views of the
+    // chess board.
+    Index parameterCount = cameraParameterCount
+        + (poseParameterCount * static_cast<Index>(validVertices.size()));
+
+    if (2 * pointCount <= parameterCount)
+    {
+        throw RayError("Underdetermined reprojection vertices");
+    }
+
+    VectorXd parameters =
+        GetInitialParameters(intrinsics, homographies);
 
     double damping = 1e-3;
 
@@ -419,7 +387,7 @@ CalibrationResult<double> Homography::RefineIntrinsics(
     // pose. Skew is excluded from the parameter vector, so it remains zero.
     for (size_t iteration = 0; iteration < 60; ++iteration)
     {
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> jacobian(
+        MatrixXd jacobian(
             residuals.size(),
             parameters.size());
 
@@ -435,7 +403,7 @@ CalibrationResult<double> Homography::RefineIntrinsics(
                     parameters(parameterIndex),
                     static_cast<size_t>(parameterIndex));
 
-            ParameterVector trial = parameters;
+            VectorXd trial = parameters;
             trial(parameterIndex) += step;
 
             auto trialResiduals = GetReprojectionResiduals(
@@ -447,17 +415,17 @@ CalibrationResult<double> Homography::RefineIntrinsics(
             jacobian.col(parameterIndex) = (trialResiduals - residuals) / step;
         }
 
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> normal =
-            jacobian.transpose() * jacobian;
+        MatrixXd normal = jacobian.transpose() * jacobian;
 
-        Eigen::Vector<double, Eigen::Dynamic> gradient =
+        VectorXd gradient =
             jacobian.transpose() * residuals;
 
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> damped = normal;
+        MatrixXd damped = normal;
+
         damped.diagonal().array() +=
             damping * normal.diagonal().cwiseAbs().array().max(1.0);
 
-        Eigen::Vector<double, Eigen::Dynamic> update =
+        VectorXd update =
             damped.colPivHouseholderQr().solve(-gradient);
 
         if (!update.allFinite())
@@ -465,9 +433,7 @@ CalibrationResult<double> Homography::RefineIntrinsics(
             break;
         }
 
-        ParameterVector trial = parameters + update;
-        trial(1) = std::max(trial(1), 1.0);
-        trial(0) = std::max(trial(0), 1.0);
+        VectorXd trial = parameters + update;
 
         auto trialResiduals = GetReprojectionResiduals(
             validVertices,
@@ -500,14 +466,14 @@ CalibrationResult<double> Homography::RefineIntrinsics(
     }
 
     auto reprojectionParameters = ToReprojectionParameters(parameters);
-    auto intrinsicsMatrix = ToIntrinsicsMatrix(reprojectionParameters);
 
     return {
         Intrinsics<double>::FromArray_pixels(
             this->settings_.pixelSize_microns,
-            this->normalize_.ToPixels(intrinsicsMatrix)),
+            this->normalize_.ToPixels(reprojectionParameters.intrinsics)),
+
         reprojectionParameters.distortion,
-        this->normalize_.Unscale(GetRmsResidual_pixels(residuals))};
+        GetRmsResidual_pixels(residuals)};
 }
 
 

@@ -83,21 +83,19 @@ void RunRoundTripTest(
 {
     auto normalizedPoint = intrinsics_pixels.ToNormalizedPixel(point);
 
-    auto normalizedDistorted =
-        ray::distortion::DistortPoint(distortion, normalizedPoint);
-
+    auto normalizedDistorted = distortion.Apply(normalizedPoint);
     auto distorted = intrinsics_pixels.ToSensorPixel(normalizedDistorted);
 
-    auto undistorted = ray::distortion::UndistortPoint(
-        intrinsics_pixels,
-        distortion,
-        distorted,
-        10,
-        0.001);
+    auto result = distortion.Undo(
+        intrinsics_pixels.ToNormalizedPixel(distorted));
 
-    REQUIRE(undistorted.has_value());
-    REQUIRE(std::abs(undistorted->x - point.x) <= 0.002);
-    REQUIRE(std::abs(undistorted->y - point.y) <= 0.002);
+    REQUIRE(!result.singularJacobian);
+    REQUIRE(result.converged);
+
+    auto resultPoint_pixels = intrinsics_pixels.ToSensorPixel(result.point);
+
+    REQUIRE(std::abs(resultPoint_pixels.x - point.x) <= 0.002);
+    REQUIRE(std::abs(resultPoint_pixels.y - point.y) <= 0.002);
 }
 
 

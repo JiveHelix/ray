@@ -50,13 +50,197 @@ using BrownConradyBase =
     BrownConradyTemplate<Float>::template Template<pex::Identity>;
 
 
-template<typename Float>
-struct BrownConrady: public BrownConradyBase<Float>
+template<typename T>
+struct BrownConrady: public BrownConradyBase<T>
 {
     template<typename U, typename Style = tau::Round>
     BrownConrady<U> Cast() const
     {
         return tau::CastFields<BrownConrady<U>, U, Style>(*this);
+    }
+
+    // Apply_ functor stores intermediate results that can be re-used in the
+    // "Undo" iterative solver.
+    struct Apply_
+    {
+        BrownConrady brownConrady;
+        tau::Point2d<T> point;
+        T xPow2;
+        T yPow2;
+        T radiusPow2;
+        T radiusPow4;
+        T radiusPow6;
+        T radialDistortion;
+        T xy;
+
+        Apply_(
+            const BrownConrady &brownConrady_,
+            const tau::Point2d<T> &point_)
+            :
+            brownConrady(brownConrady_),
+            point(point_),
+            xPow2(point_.x * point_.x),
+            yPow2(point_.y * point_.y),
+            radiusPow2(this->xPow2 + this->yPow2),
+            radiusPow4(this->radiusPow2 * this->radiusPow2),
+            radiusPow6(this->radiusPow4 * this->radiusPow2),
+
+            radialDistortion(
+                T(1)
+                + brownConrady_.k1 * this->radiusPow2
+                + brownConrady_.k2 * this->radiusPow4
+                + brownConrady_.k3 * this->radiusPow6),
+
+            xy(point_.x * point_.y)
+        {
+
+        }
+
+        tau::Point2d<T> operator()()
+        {
+            tau::Point2d<T> result;
+
+            result.x =
+                (this->point.x * this->radialDistortion)
+                + (T(2) * this->brownConrady.p1 * this->xy)
+                + (this->brownConrady.p2
+                    * (this->radiusPow2 + T(2) * this->xPow2));
+
+            result.y =
+                (this->point.y * this->radialDistortion)
+                + (this->brownConrady.p1
+                    * (this->radiusPow2 + T(2) * this->yPow2))
+                + (T(2) * this->brownConrady.p2 * this->xy);
+
+            return result;
+        }
+    };
+
+    tau::Point2d<T> Apply(
+        const tau::Point2d<T> &point) const
+    {
+        return Apply_(*this, point)();
+    }
+
+    struct UndoResult
+    {
+        tau::Point2d<T> point;
+        T residualSquared;
+        bool singularJacobian;
+        bool converged;
+    };
+
+    UndoResult Undo(
+        const tau::Point2d<T> &point,
+        int maxIterations = 10,
+        T tolerance = T(1e-6),
+        T minimumAreaScale = T(0.01)) const
+    {
+        const T toleranceSquared = tolerance * tolerance;
+        auto resultPoint = point;
+        bool converged = false;
+        T residualSquared = std::numeric_limits<T>::infinity();
+
+        for (int i = 0; i < maxIterations; ++i)
+        {
+            auto apply = Apply_(*this, resultPoint);
+            auto estimate = apply();
+            auto residual = estimate - point;
+
+            residualSquared =
+                residual.x * residual.x + residual.y * residual.y;
+
+            if (residualSquared < toleranceSquared)
+            {
+                converged = true;
+                break;
+            }
+
+            // Find the derivative of the radialDistortion w.r.t r^2
+            T dRadialWrtRadiusSquared =
+                this->k1
+                + T(2) * this->k2 * apply.radiusPow2
+                + T(3) * this->k3 * apply.radiusPow4;
+
+           /**
+                // Showing the work for
+                    d(p2 * (radiusPow2 + T(2) * xPow2)) / dx
+
+                p2 * (radiusPow2 + T(2) * xPow2)
+                    ==
+
+                p2 * (xPow2 + yPow2) + p2 * T(2) * xPow2
+                    ==
+                p2 * xPow2
+                + .p2 * yPow2
+                + p2 * T(2) * xPow2
+
+                d/dx ==
+                    2 * x * p2 + 0 + 4 * x * p2
+                    ==
+                    6 * x * p2
+
+                // Similarly for
+                    d(p1 * (radiusPow2 + T(2) * yPow2)) / dy
+                    ==
+                    6 * y * p1
+
+            **/
+
+            Eigen::Matrix<T, 2, 2> jacobian{};
+
+            // d distortionX / dx
+            jacobian(0, 0) =
+                // Apply the product rule then the chain rule
+                apply.radialDistortion
+                + T(2) * apply.xPow2 * dRadialWrtRadiusSquared
+                + T(2) * this->p1 * resultPoint.y
+                + T(6) * this->p2 * resultPoint.x;
+
+            // d distortionX / dy and d distortionY / dx have the same value for
+            // normalized correction.
+            //
+            // d distortionX / dy
+            jacobian(0, 1) =
+                // Apply the product rule then the chain rule
+                T(2) * apply.xy * dRadialWrtRadiusSquared
+                + T(2) * this->p1 * resultPoint.x
+                + T(2) * this->p2 * resultPoint.y;
+
+            // d distortionY / dx
+            jacobian(1, 0) = jacobian(0, 1);
+
+            // d distortionY / dy
+            jacobian(1, 1) =
+                apply.radialDistortion
+                + T(2) * apply.yPow2 * dRadialWrtRadiusSquared
+                + T(6) * this->p1 * resultPoint.y
+                + T(2) * this->p2 * resultPoint.x;
+
+            if (jacobian.determinant() < minimumAreaScale)
+            {
+                return {
+                    .point = resultPoint,
+                    .residualSquared = residualSquared,
+                    .singularJacobian = true,
+                    .converged = false};
+            }
+
+            // jacobian * step = residual
+            // step = jacobian^-1 * residual
+            //
+            // We care that the jacobian is invertible numerically, but we hold it
+            // to a higher standard based on geometric interpretation.
+            Eigen::Vector<T, 2> delta = jacobian.inverse() * residual.ToEigen();
+
+            resultPoint -= tau::Point2d<T>(delta);
+        }
+
+        return {
+            .point = resultPoint,
+            .residualSquared = residualSquared,
+            .singularJacobian = false,
+            .converged = converged};
     }
 };
 
@@ -87,43 +271,7 @@ DECLARE_EQUALITY_OPERATORS(BrownConrady<double>)
 
 
 template<typename T>
-tau::Point2d<T> DistortPoint(
-    const BrownConrady<T> &distortion,
-    const tau::Point2d<T> &point)
-{
-    T xPow2 = point.x * point.x;
-    T yPow2 = point.y * point.y;
-
-    T radiusPow2 = xPow2 + yPow2;
-    T radiusPow4 = radiusPow2 * radiusPow2;
-    T radiusPow6 = radiusPow4 * radiusPow2;
-
-    T radialDistortion =
-        T(1)
-        + distortion.k1 * radiusPow2
-        + distortion.k2 * radiusPow4
-        + distortion.k3 * radiusPow6;
-
-    T xy = point.x * point.y;
-
-    tau::Point2d<T> result;
-
-    result.x =
-        point.x * radialDistortion
-        + T(2) * distortion.p1 * xy
-        + distortion.p2 * (radiusPow2 + T(2) * xPow2);
-
-    result.y =
-        point.y * radialDistortion
-        + distortion.p1 * (radiusPow2 + T(2) * yPow2)
-        + T(2) * distortion.p2 * xy;
-
-    return result;
-}
-
-
-template<typename T>
-constexpr T GetTolerance(
+constexpr T GetNormalizedTolerance(
     const IntrinsicsAsPixels<T> &intrinsics_pixels,
     T pixelTolerance)
 {
@@ -135,131 +283,6 @@ constexpr T GetTolerance(
     return pixelTolerance / maxFocalLength_pixels;
 }
 
-
-template<typename T>
-std::optional<tau::Point2d<T>> UndistortPoint(
-    const IntrinsicsAsPixels<T> &intrinsics_pixels,
-    const BrownConrady<T> &distortion,
-    const tau::Point2d<T> &distortedPoint,
-    int maxIterations = 10,
-    T pixelTolerance = T(1e-3))
-{
-    const T tolerance = GetTolerance(intrinsics_pixels, pixelTolerance);
-    const T toleranceSquared = tolerance * tolerance;
-    auto normalizedPoint = intrinsics_pixels.ToNormalizedPixel(distortedPoint);
-    T xd = normalizedPoint.x;
-    T yd = normalizedPoint.y;
-
-    T x = xd;
-    T y = yd;
-
-    for (int i = 0; i < maxIterations; ++i)
-    {
-        T xSquared = x * x;
-        T ySquared = y * y;
-        T xy = x * y;
-
-        T rSquared = xSquared + ySquared;
-        T rPower4 = rSquared * rSquared;
-        T rPower6 = rPower4 * rSquared;
-
-        T radial =
-            T(1)
-            + distortion.k1 * rSquared
-            + distortion.k2 * rPower4
-            + distortion.k3 * rPower6;
-
-        T residualX =
-            x * radial
-            + T(2) * distortion.p1 * xy
-            + distortion.p2 * (rSquared + T(2) * xSquared)
-            - xd;
-
-        T residualY =
-            y * radial
-            + distortion.p1 * (rSquared + T(2) * ySquared)
-            + T(2) * distortion.p2 * xy
-            - yd;
-
-        T residualSquared = residualX * residualX + residualY * residualY;
-
-        if (residualSquared < toleranceSquared)
-        {
-            break;
-        }
-
-        T radialDerivative =
-            distortion.k1
-            + T(2) * distortion.k2 * rSquared
-            + T(3) * distortion.k3 * rPower4;
-
-        T common = T(2) * xy * radialDerivative;
-
-        T j00 =
-            radial
-            + T(2) * xSquared * radialDerivative
-            + T(2) * distortion.p1 * y
-            + T(6) * distortion.p2 * x;
-
-        T j01 =
-            common
-            + T(2) * distortion.p1 * x
-            + T(2) * distortion.p2 * y;
-
-        T j10 =
-            common
-            + T(2) * distortion.p1 * x
-            + T(2) * distortion.p2 * y;
-
-        T j11 =
-            radial
-            + T(2) * ySquared * radialDerivative
-            + T(6) * distortion.p1 * y
-            + T(2) * distortion.p2 * x;
-
-        T determinant = j00 * j11 - j01 * j10;
-
-        T determinantScale =
-            std::max(
-                std::max(std::abs(j00), std::abs(j01)),
-                std::max(std::abs(j10), std::abs(j11)));
-
-        if (determinantScale == T(0))
-        {
-            std::cerr << "Jacobian is 0." << std::endl;
-
-            return std::nullopt;
-        }
-
-        static constexpr T determinantTolerance =
-            T(1000) * std::numeric_limits<T>::epsilon();
-
-        T minimumDeterminant =
-            determinantTolerance * determinantScale * determinantScale;
-
-        if (abs(determinant) <= minimumDeterminant)
-        {
-            std::cerr << "Determinant is below limit" << std::endl;
-
-            return std::nullopt;
-        }
-
-        T dx = ( j11 * residualX - j01 * residualY) / determinant;
-        T dy = (-j10 * residualX + j00 * residualY) / determinant;
-
-        x -= dx;
-        y -= dy;
-
-#if 0
-        if (dx * dx + dy * dy < toleranceSquared)
-        {
-            break;
-        }
-#endif
-    }
-
-    return intrinsics_pixels.ToSensorPixel(tau::Point2d<T>{x, y});
-}
 
 
 } // end namespace distortion
