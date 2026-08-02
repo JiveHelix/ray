@@ -25,21 +25,27 @@ ConstrainedElements GetConstrainedElements(
 ConstrainedFactors GetConstrainedFactors(const HomographyMatrix &homography);
 
 
-class World
+class LogicalToMeters
 {
 public:
     static constexpr double metersPerMillimeter = 1e-3;
 
-    World(double chessSquareSize_mm)
+    LogicalToMeters(double chessSquareSize_mm)
         :
         chessSquareSize_m_(chessSquareSize_mm * metersPerMillimeter)
     {
 
     }
 
-    tau::Point2d<double> operator()(const tau::Point2d<size_t> &logical) const
+    tau::Point3d<double> operator()(const tau::Point2d<size_t> &logical) const
     {
-        return logical.template Cast<double>() * this->chessSquareSize_m_;
+        tau::Point3d<double> result;
+
+        auto xAndY = logical.template Cast<double>() * this->chessSquareSize_m_;
+        result.x = xAndY.x;
+        result.y = xAndY.y;
+
+        return result;
     }
 
 private:
@@ -81,7 +87,7 @@ public:
 
 private:
     HomographySettings settings_;
-    World world_;
+    LogicalToMeters logicalToMeters_;
     tau::Size<double> sensorSize_;
     ray::NormalizePixel normalize_;
 };

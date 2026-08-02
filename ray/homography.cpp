@@ -4,8 +4,6 @@
 #include <tau/svd.h>
 #include <cmath>
 
-#include <ceres/ceres.h>
-
 
 namespace ray
 {
@@ -54,7 +52,7 @@ ConstrainedFactors GetConstrainedFactors(const HomographyMatrix &homography)
 Homography::Homography(const HomographySettings &settings)
     :
     settings_(settings),
-    world_(settings.squareSize_mm),
+    logicalToMeters_(settings.squareSize_mm),
     sensorSize_(settings.sensorSize_pixels),
     normalize_(settings.sensorSize_pixels)
 {
@@ -65,7 +63,7 @@ Homography::Homography(const HomographySettings &settings)
 Eigen::Matrix<double, 2, 9>
 Homography::GetHomographyFactors(const NamedVertex &vertex)
 {
-    auto world = this->world_(vertex.logical);
+    auto world = this->logicalToMeters_(vertex.logical);
 
     // vertex should have been pre-normalized
     auto sensor = vertex.pixel;

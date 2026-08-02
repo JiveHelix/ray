@@ -4,6 +4,7 @@
 #include <fields/fields.h>
 #include <fields/compare.h>
 #include <pex/group.h>
+#include <pex/identity.h>
 #include <nlohmann/json.hpp>
 
 #include <tau/eigen_shim.h>
@@ -184,6 +185,18 @@ struct IntrinsicsAsPixelsCustom
             return {
                 pixel.x * this->focalLengthX + this->principalX,
                 pixel.y * this->focalLengthY + this->principalY};
+        }
+
+        template<typename U, typename Style = tau::Round>
+        auto Cast() const
+        {
+            using Result = IntrinsicsAsPixelsCustom<U>::template Plain
+                <
+                    typename IntrinsicsAsPixelsTemplate<U>
+                        ::template Template<pex::Identity>
+                >;
+
+            return tau::CastFields<Result, U, Style>(*this);
         }
     };
 };

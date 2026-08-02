@@ -180,6 +180,7 @@ public:
         fields::Field(&Projection::worldToImage_, "worldToImage"),
         fields::Field(&Projection::imageToWorld_, "imageToWorld"));
 
+    static constexpr auto fieldsTypeName = "Projection";
 };
 
 

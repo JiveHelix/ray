@@ -1,5 +1,6 @@
 #include <ray/homography.h>
 #include <ray/error.h>
+#include <ceres/ceres.h>
 
 
 namespace ray
@@ -11,6 +12,11 @@ namespace
 
 
 using Eigen::Index;
+using Eigen::Vector2d;
+using Eigen::Vector3d;
+using Eigen::Vector4d;
+using Eigen::Matrix3d;
+using Eigen::Matrix4d;
 
 
 constexpr Index cameraParameterCount = 9;
@@ -34,14 +40,6 @@ ReprojectionParameters ToReprojectionParameters(
     return {
         intrinsics,
         {}};
-}
-
-
-IntrinsicsMatrix ToIntrinsicsMatrix(const ReprojectionParameters &parameters)
-{
-    assert(result(0, 1) == 0.0);
-
-    return parameters.intrinsics;
 }
 
 
@@ -119,23 +117,31 @@ VectorXd ToVector(const ReprojectionParameters &parameters)
 }
 
 
+template<typename T>
+Eigen::Matrix<T, 3, 3> GetIntrinsicsMatrix(
+    const T *parameters)
+{
+    using Matrix = Eigen::Matrix<T, 3, 3>;
+    Matrix result = Matrix::Identity();
+    result(0, 0) = parameters[0];
+    result(1, 1) = parameters[1];
+    result(0, 2) = parameters[2];
+    result(1, 2) = parameters[3];
+
+    return result;
+}
+
+
 ReprojectionParameters ToReprojectionParameters(
     const VectorXd &parameters)
 {
-    IntrinsicsMatrix intrinsics = IntrinsicsMatrix::Identity();
-    intrinsics(0, 0) = parameters(0);
-    intrinsics(1, 1) = parameters(1);
-    intrinsics(0, 2) = parameters(2);
-    intrinsics(1, 2) = parameters(3);
+    assert(parameters.size() >= 9);
+
+    IntrinsicsMatrix intrinsics = GetIntrinsicsMatrix(parameters.data());
 
     return {
         intrinsics,
-        {
-            parameters(4),
-            parameters(5),
-            parameters(6),
-            parameters(7),
-            parameters(8)}};
+        {parameters.data() + 4}};
 }
 
 
@@ -150,18 +156,32 @@ Eigen::Vector3<double> GetRotationVector(
 
 
 // Return the rotation matrix defined by the angle axis representation.
-Eigen::Matrix<double, 3, 3> GetRotationMatrix(
-    const Eigen::Vector3<double> &rotationVector)
+template<typename Derived>
+Eigen::Matrix<typename Derived::Scalar, 3, 3> GetRotationMatrix(
+    const Eigen::DenseBase<Derived> &rotationVector)
 {
-    double angle = rotationVector.norm();
+    static_assert(
+        Derived::ColsAtCompileTime == 1
+            || Derived::ColsAtCompileTime == Eigen::Dynamic,
+        "rotationVector must be a column vector");
 
-    if (angle < 1e-12)
+    using T = typename Derived::Scalar;
+
+    if (rotationVector.size() != 3)
     {
-        return Eigen::Matrix<double, 3, 3>::Identity();
+        throw RayError("Rotation vector must have 3 elements");
     }
 
-    return Eigen::AngleAxis<double>(angle, rotationVector / angle)
-        .toRotationMatrix();
+    T angle = rotationVector.derived().norm();
+
+    if (angle < T(1e-12))
+    {
+        return Eigen::Matrix<T, 3, 3>::Identity();
+    }
+
+    Eigen::Vector<T, 3> axis = rotationVector.derived() / angle;
+
+    return Eigen::AngleAxis<T>(angle, axis).toRotationMatrix();
 }
 
 
@@ -206,37 +226,70 @@ VectorXd GetInitialParameters(
 }
 
 
-double GetStep(double value, size_t index)
+class ReprojectionResidual
 {
-    if (index < 4)
+public:
+    ReprojectionResidual(
+        const tau::Point2d<double> &observed,
+        const tau::Point3d<double> &world)
+        :
+        observed_(observed),
+        world_(world.GetHomogeneous())
     {
-        // fx, fy, cx, cy
-        return std::max(1e-3, std::abs(value) * 1e-6);
+
     }
 
-    if (index < cameraParameterCount)
+    template<typename T>
+    static Eigen::Matrix<T, 4, 4> GetExtrinsics(const T *pose)
     {
-        // Distortion parameters.
-        return std::max(1e-8, std::abs(value) * 1e-4);
+        Eigen::Matrix<T, 4, 4> result = Eigen::Matrix<T, 4, 4>::Identity();
+
+        // Take the first values of pose as the rotation vector.
+        result.template block<3, 3>(0, 0) =
+            GetRotationMatrix(Eigen::Map<const Eigen::Vector<T, 3>>(pose));
+
+        result.template block<3, 1>(0, 3) =
+            Eigen::Map<const Eigen::Vector<T, 3>>(pose + 3);
+
+        return result;
     }
 
-    size_t poseIndex =
-        (index - cameraParameterCount) % poseParameterCount;
-
-    if (poseIndex < 3)
+    // Let Ceres Solver use its own type for auto differentiation.
+    template<typename T>
+    bool operator()(
+        const T *camera,
+        const T *pose,
+        T *residuals) const
     {
-        // Rotation vector, radians.
-        return std::max(1e-6, std::abs(value) * 1e-5);
+        auto intrinsics = GetIntrinsicsMatrix(camera);
+        auto brownConrady = distortion::BrownConrady<T>(camera + 4);
+
+        Eigen::Vector<T, 4> cameraPoint =
+            GetExtrinsics(pose) * this->world_.template cast<T>();
+
+        Eigen::Vector<T, 3> normalizedCameraPoint =
+            cameraPoint.template head<3>() / cameraPoint(2);
+
+        auto distortedPoint = brownConrady.Apply(normalizedCameraPoint);
+
+        Eigen::Vector<T, 3> predicted_pixels = intrinsics * distortedPoint;
+
+        residuals[0] = predicted_pixels(0) - T(this->observed_.x);
+        residuals[1] = predicted_pixels(1) - T(this->observed_.y);
+
+        return true;
     }
 
-    // Translation, meters.
-    return std::max(1e-6, std::abs(value) * 1e-6);
-}
+private:
+    // Homogeneous points
+    tau::Point2d<double> observed_;
+    Vector4d world_;
+};
 
 
 VectorXd GetReprojectionResiduals(
     const std::vector<PlanarVertices> &namedVertices,
-    const World &world,
+    const LogicalToMeters &logicalToMeters,
     const VectorXd &parameters,
     double unscale)
 {
@@ -264,28 +317,25 @@ VectorXd GetReprojectionResiduals(
 
         for (const auto &vertex: vertices)
         {
-            auto worldPoint = world(vertex.logical);
-
-            Eigen::Vector3<double> planarWorld(
-                worldPoint.x,
-                worldPoint.y,
-                0.0);
+            auto planarWorld = logicalToMeters(vertex.logical).ToEigen();
 
             Eigen::Vector3<double> camera =
                 rotation * planarWorld + translation;
 
-            // Residuals are measured in pixels after perspective projection
-            // and lens distortion.
-            camera.array() /= camera(2);
+            camera(0) /= camera(2);
+            camera(1) /= camera(2);
 
             auto distorted = cameraParameters.distortion.Apply(
                 tau::Point2d<double>(camera.template head<2>()));
 
-            Eigen::Vector3d predicted =
+            // Residuals are measured in pixels after perspective projection
+            // and lens distortion.
+            Vector3d predicted =
                 cameraParameters.intrinsics * distorted.GetHomogeneous();
 
             auto residual =
-                predicted.head<2>().array() - vertex.pixel.ToEigen().array();
+                predicted.template head<2>().array()
+                - vertex.pixel.ToEigen().array();
 
             result(row++) = residual(0);
             result(row++) = residual(1);
@@ -295,6 +345,22 @@ VectorXd GetReprojectionResiduals(
     // The quantity I want to minimize is geometric error measured in pixels.
     return result * unscale;
 }
+
+
+using ReprojectionCostFunction =
+    ceres::AutoDiffCostFunction
+    <
+        ReprojectionResidual,
+
+        // Two residuals
+        2,
+
+        // 9 parameters in block 0
+        cameraParameterCount,
+
+        // 6 parameters in block 1
+        poseParameterCount
+    >;
 
 
 double GetRmsResidual_pixels(
@@ -373,99 +439,94 @@ CalibrationResult<double> Homography::RefineIntrinsics(
     VectorXd parameters =
         GetInitialParameters(intrinsics, homographies);
 
-    double damping = 1e-3;
+    ceres::Problem problem;
 
-    auto residuals = GetReprojectionResiduals(
-        validVertices,
-        this->world_,
-        parameters,
-        this->normalize_.GetUnscale());
+    double *cameraParameters = parameters.data();
 
-    double error = residuals.squaredNorm();
+    problem.AddParameterBlock(
+        cameraParameters,
+        cameraParameterCount);
 
-    // Levenberg-Marquardt style refinement over K, distortion, and every board
-    // pose. Skew is excluded from the parameter vector, so it remains zero.
-    for (size_t iteration = 0; iteration < 60; ++iteration)
+    auto ordering =
+        std::make_shared<ceres::ParameterBlockOrdering>();
+
+    ordering->AddElementToGroup(cameraParameters, 1);
+
+    for (size_t i = 0; i < validVertices.size(); ++i)
     {
-        MatrixXd jacobian(
-            residuals.size(),
-            parameters.size());
+        double *poseParameters =
+            parameters.data() + cameraParameterCount + (poseParameterCount * i);
 
-        // Numerical derivatives keep the optimizer local to this translation
-        // unit without adding a dependency on a larger optimization library.
-        for (
-            Index parameterIndex = 0;
-            parameterIndex < parameters.size();
-            ++parameterIndex)
+        problem.AddParameterBlock(
+            poseParameters,
+            poseParameterCount);
+
+        ordering->AddElementToGroup(poseParameters, 0);
+
+        for (const auto &vertex: validVertices[i])
         {
-            double step =
-                GetStep(
-                    parameters(parameterIndex),
-                    static_cast<size_t>(parameterIndex));
+            auto worldPoint = this->logicalToMeters_(vertex.logical);
 
-            VectorXd trial = parameters;
-            trial(parameterIndex) += step;
+            auto residual =
+                std::make_unique<ReprojectionResidual>(
+                    vertex.pixel,
+                    worldPoint);
 
-            auto trialResiduals = GetReprojectionResiduals(
-                validVertices,
-                this->world_,
-                trial,
-                this->normalize_.GetUnscale());
+            auto costFunction =
+                std::make_unique<ReprojectionCostFunction>(
+                    residual.release());
 
-            jacobian.col(parameterIndex) = (trialResiduals - residuals) / step;
-        }
+            problem.AddResidualBlock(
+                costFunction.release(),
 
-        MatrixXd normal = jacobian.transpose() * jacobian;
+                // We are not using a loss function.
+                nullptr,
 
-        VectorXd gradient =
-            jacobian.transpose() * residuals;
-
-        MatrixXd damped = normal;
-
-        damped.diagonal().array() +=
-            damping * normal.diagonal().cwiseAbs().array().max(1.0);
-
-        VectorXd update =
-            damped.colPivHouseholderQr().solve(-gradient);
-
-        if (!update.allFinite())
-        {
-            break;
-        }
-
-        VectorXd trial = parameters + update;
-
-        auto trialResiduals = GetReprojectionResiduals(
-            validVertices,
-            this->world_,
-            trial,
-            this->normalize_.GetUnscale());
-
-        double trialError = trialResiduals.squaredNorm();
-
-        // Accept only downhill steps. Rejected steps increase damping, accepted
-        // steps relax it so the solve moves back toward Gauss-Newton.
-        if (trialError < error)
-        {
-            parameters = trial;
-            residuals = trialResiduals;
-
-            if (std::abs(error - trialError) < 1e-10)
-            {
-                error = trialError;
-                break;
-            }
-
-            error = trialError;
-            damping = std::max(damping * 0.5, 1e-12);
-        }
-        else
-        {
-            damping = std::min(damping * 4.0, 1e12);
+                cameraParameters,
+                poseParameters);
         }
     }
 
-    auto reprojectionParameters = ToReprojectionParameters(parameters);
+    ceres::Solver::Options options;
+
+    options.max_num_iterations = 50;
+    options.function_tolerance = 1e-10;
+    options.gradient_tolerance = 1e-12;
+    options.parameter_tolerance = 1e-12;
+    options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+    options.linear_solver_type = ceres::DENSE_SCHUR;
+    options.linear_solver_ordering = ordering;
+
+#ifdef NDEBUG
+    options.logging_type = ceres::SILENT;
+    options.minimizer_progress_to_stdout = false;
+#endif
+
+    ceres::Solver::Summary summary;
+
+    ceres::Solve(options, &problem, &summary);
+
+    if (!summary.IsSolutionUsable())
+    {
+        throw RayError(
+            fmt::format(
+                "Ceres Solver failed to refine intrinsics: {}",
+                summary.message));
+    }
+    else
+    {
+        // std::cout << summary.FullReport() << std::endl;
+    }
+
+    auto residuals =
+        GetReprojectionResiduals(
+            validVertices,
+            this->logicalToMeters_,
+            parameters,
+            this->normalize_.GetUnscale());
+
+    auto reprojectionParameters =
+        ToReprojectionParameters(parameters);
 
     return {
         Intrinsics<double>::FromArray_pixels(

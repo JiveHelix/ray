@@ -24,7 +24,7 @@ ray::PlanarVertices CreatePlanarVertices(
     const ray::HomographySettings &homographySettings,
     const ray::Intrinsics<double> &intrinsics,
     const ray::Pose<double> &pose,
-    const Distortion &distortion = {0, 0, 0, 0, 0})
+    const Distortion &distortion = Distortion{})
 {
     ray::Projection projection(intrinsics, pose);
     auto intrinsicsArray = intrinsics.GetArray_pixels();
@@ -106,8 +106,7 @@ public:
         const ray::HomographySettings &homographySettings,
         const tau::Size<size_t> &vertexCount,
         const ray::Intrinsics<double> &intrinsics,
-        const Distortion &distortion =
-            {0, 0, 0, 0, 0})
+        const Distortion &distortion = Distortion{})
         :
         homographySettings_(homographySettings),
         vertexCount_(vertexCount),
@@ -240,11 +239,12 @@ TEST_CASE("HomographyMatrix round trip", "[homography]")
     ray::HomographyMatrix homographyMatrix =
         homography.GetHomographyMatrix(GetNormalized(normalize, solution));
 
-    auto world = ray::World(homographySettings.squareSize_mm);
+    auto logicalToMeters =
+        ray::LogicalToMeters(homographySettings.squareSize_mm);
 
     for (auto &vertex: solution)
     {
-        auto worldPoint = world(vertex.logical);
+        auto worldPoint = logicalToMeters(vertex.logical);
         auto pixel = normalize(vertex.pixel);
 
         tau::Vector3<double> pixelH(pixel.x, pixel.y, 1);
@@ -379,7 +379,7 @@ TEST_CASE("Jointly solve intrinsics and distortion", "[homography]")
         1080.0_d / 2.0_d,
         0_d}};
 
-    Distortion expectedDistortion{-0.05, 0.01, 0.001, -0.0005, 0.002};
+    Distortion expectedDistortion({-0.05, 0.01, 0.001, -0.0005, 0.002});
 
     auto homographySettings = ray::HomographySettings{};
 

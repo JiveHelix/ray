@@ -59,6 +59,32 @@ struct BrownConrady: public BrownConradyBase<T>
         return tau::CastFields<BrownConrady<U>, U, Style>(*this);
     }
 
+    BrownConrady()
+        :
+        BrownConradyBase<T>{}
+    {
+
+    }
+
+    BrownConrady(const BrownConradyBase<T> &base)
+        :
+        BrownConradyBase<T>(base)
+    {
+
+    }
+
+    BrownConrady(const T *parameters)
+        :
+        BrownConradyBase<T>{
+            .k1 = parameters[0],
+            .k2 = parameters[1],
+            .p1 = parameters[2],
+            .p2 = parameters[3],
+            .k3 = parameters[4]}
+    {
+
+    }
+
     // Apply_ functor stores intermediate results that can be re-used in the
     // "Undo" iterative solver.
     struct Apply_
@@ -120,6 +146,19 @@ struct BrownConrady: public BrownConradyBase<T>
         const tau::Point2d<T> &point) const
     {
         return Apply_(*this, point)();
+    }
+
+    Eigen::Vector<T, 3> Apply(
+        const Eigen::Vector<T, 3> &point) const
+    {
+        Eigen::Vector<T, 3> result{};
+        result(2) = T(1);
+
+        result.template head<2>() =
+            Apply_(*this, tau::Point2d<T>(point.template head<2>()))()
+                .ToEigen();
+
+        return result;
     }
 
     struct UndoResult
@@ -217,6 +256,8 @@ struct BrownConrady: public BrownConradyBase<T>
                 + T(6) * this->p1 * resultPoint.y
                 + T(2) * this->p2 * resultPoint.x;
 
+            // We care that the jacobian is invertible numerically, but we hold
+            // it to a higher standard based on geometric interpretation.
             if (jacobian.determinant() < minimumAreaScale)
             {
                 return {
@@ -228,9 +269,6 @@ struct BrownConrady: public BrownConradyBase<T>
 
             // jacobian * step = residual
             // step = jacobian^-1 * residual
-            //
-            // We care that the jacobian is invertible numerically, but we hold it
-            // to a higher standard based on geometric interpretation.
             Eigen::Vector<T, 2> delta = jacobian.inverse() * residual.ToEigen();
 
             resultPoint -= tau::Point2d<T>(delta);
