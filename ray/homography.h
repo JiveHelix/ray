@@ -2,7 +2,7 @@
 
 
 #include <ray/normalize_pixel.h>
-#include <ray/lens_calibration.h>
+#include <ray/calibration_result.h>
 #include <ray/named_vertex.h>
 #include <ray/homography_settings.h>
 
@@ -75,10 +75,12 @@ public:
 
     CalibrationResult<double> RefineIntrinsics(
         const IntrinsicsMatrix &intrinsics,
-        const std::vector<PlanarVertices> &namedVertices);
+        const std::vector<PlanarVertices> &namedVertices,
+        distortion::Direction direction);
 
     CalibrationResult<double> Calibrate(
-        const std::vector<PlanarVertices> &namedVertices);
+        const std::vector<PlanarVertices> &namedVertices,
+        distortion::Direction direction);
 
     const ray::NormalizePixel & GetNormalizePixel() const
     {

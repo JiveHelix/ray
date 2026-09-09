@@ -10,6 +10,7 @@
 
 using namespace tau::literals;
 using Distortion = ray::distortion::BrownConrady<double>;
+using Direction = ray::distortion::Direction;
 
 
 // chessBoardOffset_m
@@ -67,11 +68,44 @@ ray::PlanarVertices CreatePlanarVertices(
 
             auto point = tau::Point2d<double>(camera.template head<2>());
 
-            auto distorted = distortion.Apply(point);
+            Eigen::Vector3<double> projected;
 
-            Eigen::Vector3<double> projected =
-                intrinsicsArray
-                * Eigen::Vector3<double>(distorted.x, distorted.y, 1);
+            if (distortion.direction == Direction::forward)
+            {
+                // Forward distortion model starts with corrected point and
+                // generates distorted point.
+                auto distorted = distortion.Apply(point);
+
+                projected =
+                    intrinsicsArray
+                    * Eigen::Vector3<double>(distorted.x, distorted.y, 1);
+            }
+            else if (distortion.direction == Direction::inverse)
+            {
+                // Inverse distortion model starts with distored point and
+                // generates corrected point.
+                // To get back to distorted point, we must use the iterative
+                // "Undo" function.
+                // Because I'm using Undo to generate synthetic data, I'm
+                // pushing it much harder than would be reasonable in
+                // production.
+                auto undoResult = distortion.Undo(point, 30, 1e-12);
+
+                if (!undoResult.converged)
+                {
+                    throw std::logic_error("Bad undo result");
+                }
+
+                auto distorted = undoResult.point;
+
+                projected =
+                    intrinsicsArray
+                    * Eigen::Vector3<double>(distorted.x, distorted.y, 1);
+            }
+            else
+            {
+                throw std::logic_error("Unknown distortion direction");
+            }
 
             current.pixel.x = projected(0);
             current.pixel.y = projected(1);
@@ -342,7 +376,8 @@ TEST_CASE("Solve for zero distortion", "[homography]")
     auto minimized =
         homography.RefineIntrinsics(
             normalize.ToNormalized(intrinsics.GetArray_pixels()),
-            GetNormalized(normalize, solutions));
+            GetNormalized(normalize, solutions),
+            ray::distortion::Direction::forward);
 
     Distortion distortion = minimized.lensCalibration.distortion;
 
@@ -369,7 +404,7 @@ TEST_CASE("Solve for zero distortion", "[homography]")
 }
 
 
-TEST_CASE("Jointly solve intrinsics and distortion", "[homography]")
+TEST_CASE("Jointly solve intrinsics and forward distortion", "[homography]")
 {
     ray::Intrinsics<double> expectedIntrinsics{{
         10_d,
@@ -379,7 +414,8 @@ TEST_CASE("Jointly solve intrinsics and distortion", "[homography]")
         1080.0_d / 2.0_d,
         0_d}};
 
-    Distortion expectedDistortion({-0.05, 0.01, 0.001, -0.0005, 0.002});
+    Distortion expectedDistortion(
+        {Direction::forward, -0.05, 0.01, 0.001, -0.0005, 0.002});
 
     auto homographySettings = ray::HomographySettings{};
 
@@ -431,7 +467,10 @@ TEST_CASE("Jointly solve intrinsics and distortion", "[homography]")
     auto initialIntrinsics = homography.EstimateIntrinsics(normalizedSolutions);
 
     auto minimized =
-        homography.RefineIntrinsics(initialIntrinsics, normalizedSolutions);
+        homography.RefineIntrinsics(
+            initialIntrinsics,
+            normalizedSolutions,
+            ray::distortion::Direction::forward);
 
     auto intrinsicsMatrix =
         minimized.lensCalibration.intrinsics.GetArray_pixels();
@@ -451,6 +490,123 @@ TEST_CASE("Jointly solve intrinsics and distortion", "[homography]")
     std::cout << fields::DescribeColorized(minimized, 1) << std::endl;
 
     auto distortionMargin = 1e-4;
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.direction == Direction::forward);
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.k1
+            == Approx(expectedDistortion.k1).margin(distortionMargin));
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.k2
+            == Approx(expectedDistortion.k2).margin(distortionMargin));
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.k3
+            == Approx(expectedDistortion.k3).margin(distortionMargin));
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.p1
+            == Approx(expectedDistortion.p1).margin(distortionMargin));
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.p2
+            == Approx(expectedDistortion.p2).margin(distortionMargin));
+
+    REQUIRE(minimized.rmsReprojectionError_pixels < 1e-5);
+}
+
+
+TEST_CASE("Jointly solve intrinsics and inverse distortion", "[homography]")
+{
+    ray::Intrinsics<double> expectedIntrinsics{{
+        10_d,
+        25_d,
+        25_d,
+        1920.0_d / 2.0_d,
+        1080.0_d / 2.0_d,
+        0_d}};
+
+    Distortion expectedDistortion(
+        {Direction::inverse, -0.05, 0.01, 0.001, -0.0005, 0.002});
+
+    auto homographySettings = ray::HomographySettings{};
+
+    Solutions solutions;
+
+    SolutionCreator creator(
+        homographySettings,
+        {8, 6},
+        expectedIntrinsics,
+        expectedDistortion);
+
+    solutions.push_back(creator.CreateSolution(0, 0, 0, {2, 0, 0}));
+    solutions.push_back(creator.CreateSolution(8, -6, 15, {1.9, 0.2, -0.1}));
+    solutions.push_back(creator.CreateSolution(-7, 9, -17, {2.1, -0.3, 0}));
+    solutions.push_back(creator.CreateSolution(5, 11, -10, {2.05, -0.5, 0}));
+    solutions.push_back(creator.CreateSolution(-6, -8, 11, {1.95, 0, 0.2}));
+    solutions.push_back(creator.CreateSolution(-5, -7, 12, {3.0, 0.4, 0}));
+    solutions.push_back(creator.CreateSolution(7, 10, -14, {1.5, 0.1, 0}));
+
+    // Find min/max pixel coordinates of synthetic vertices
+    double minX = 10000.;
+    double maxX = 0.;
+
+    double minY = 10000.;
+    double maxY = 0.;
+
+    for (const auto &planarVertices: solutions)
+    {
+        for (const auto &vertex: planarVertices)
+        {
+            minX = std::min(vertex.pixel.x, minX);
+            minY = std::min(vertex.pixel.y, minY);
+
+            maxX = std::max(vertex.pixel.x, maxX);
+            maxY = std::max(vertex.pixel.y, maxY);
+        }
+    }
+
+    REQUIRE(minX >= 0.0);
+    REQUIRE(minY >= 0.0);
+    REQUIRE(maxX <= homographySettings.sensorSize_pixels.width - 1);
+    REQUIRE(maxY <= homographySettings.sensorSize_pixels.height - 1);
+
+    auto homography = ray::Homography(homographySettings);
+
+    auto normalizedSolutions =
+        GetNormalized(homography.GetNormalizePixel(), solutions);
+
+    auto initialIntrinsics = homography.EstimateIntrinsics(normalizedSolutions);
+
+    auto minimized =
+        homography.RefineIntrinsics(
+            initialIntrinsics,
+            normalizedSolutions,
+            ray::distortion::Direction::inverse);
+
+    auto intrinsicsMatrix =
+        minimized.lensCalibration.intrinsics.GetArray_pixels();
+
+    REQUIRE(intrinsicsMatrix(0, 1) == Approx(0.0).margin(1e-12));
+
+    REQUIRE(
+        intrinsicsMatrix(0, 0)
+            == Approx(expectedIntrinsics.GetArray_pixels()(0, 0))
+                .epsilon(0.02));
+
+    REQUIRE(
+        intrinsicsMatrix(1, 1)
+            == Approx(expectedIntrinsics.GetArray_pixels()(1, 1))
+                .epsilon(0.02));
+
+    std::cout << fields::DescribeColorized(minimized, 1) << std::endl;
+
+    auto distortionMargin = 1e-4;
+
+    REQUIRE(
+        minimized.lensCalibration.distortion.direction == Direction::inverse);
 
     REQUIRE(
         minimized.lensCalibration.distortion.k1

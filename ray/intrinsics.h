@@ -1,8 +1,8 @@
 #pragma once
 
-#include <jive/version.h>
 #include <fields/fields.h>
 #include <fields/compare.h>
+#include <fields/formatter.h>
 #include <pex/group.h>
 #include <pex/identity.h>
 #include <nlohmann/json.hpp>
@@ -198,6 +198,31 @@ struct IntrinsicsAsPixelsCustom
 
             return tau::CastFields<Result, U, Style>(*this);
         }
+
+        using Matrix = Eigen::Matrix<Float, 3, 3>;
+
+        static Plain FromArray(
+            const Matrix &array_pixels)
+        {
+            Plain result{};
+            result.focalLengthX = array_pixels(0, 0);
+            result.focalLengthY = array_pixels(1, 1);
+            result.skew = array_pixels(0, 1);
+            result.principalX = array_pixels(0, 2);
+            result.principalY = array_pixels(1, 2);
+
+            return result;
+        }
+
+        Matrix GetArray() const
+        {
+            Matrix m{
+                {this->focalLengthX, this->skew, this->principalX},
+                {0.0, this->focalLengthY, this->principalY},
+                {0.0, 0.0, 1.0}};
+
+            return m;
+        }
     };
 };
 
@@ -228,7 +253,6 @@ struct Intrinsics:
     using Base =
         typename IntrinsicsTemplate<T>::template Template<pex::Identity>;
 
-    static constexpr auto version = jive::Version<uint8_t>(1, 1, 0);
     static constexpr auto millimetersPerMeter = static_cast<T>(1e3);
 
     using Matrix = Eigen::Matrix<T, 3, 3>;
@@ -394,27 +418,6 @@ struct Intrinsics:
         return m / focalProduct;
     }
 
-    static Intrinsics Deserialize(const std::string &asString)
-    {
-        auto unstructured = nlohmann::json::parse(asString);
-        auto fileVersion = jive::Version<uint8_t>(unstructured["version"]);
-        auto minimumVersion = jive::Version<uint8_t>(1, 0, 0);
-
-        if (fileVersion < minimumVersion)
-        {
-            throw std::runtime_error("Incompatible file version");
-        }
-
-        return fields::Structure<Intrinsics>(unstructured);
-    }
-
-    std::string Serialize() const
-    {
-        auto unstructured = fields::Unstructure<nlohmann::json>(*this);
-        unstructured["version"] = Intrinsics::version.ToString();
-        return unstructured.dump(4);
-    }
-
     template<typename U, typename Style = tau::Round>
     Intrinsics<U> Cast() const
     {
@@ -446,3 +449,13 @@ using IntrinsicsControl = typename IntrinsicsGroup<T>::DefaultControl;
 
 
 } // end namespace ray
+
+
+
+template<>
+struct std::formatter<ray::Intrinsics<double>>
+    : fields::Formatter<ray::Intrinsics<double>> {};
+
+template<>
+struct std::formatter<ray::Intrinsics<float>>
+    : fields::Formatter<ray::Intrinsics<float>> {};

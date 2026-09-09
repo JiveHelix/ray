@@ -69,7 +69,6 @@ using Extrinsic = Eigen::Matrix<T, 4, 4>;
 template<typename T>
 struct Pose: public PoseTemplate<T>::template Template<pex::Identity>
 {
-    static constexpr auto version = jive::Version<uint8_t>(1, 0, 0);
     using Base = typename PoseTemplate<T>::template Template<pex::Identity>;
 
     Pose()
@@ -182,13 +181,6 @@ struct Pose: public PoseTemplate<T>::template Template<pex::Identity>
     static Pose Deserialize(const std::string &asString)
     {
         auto unstructured = nlohmann::json::parse(asString);
-        auto fileVersion = jive::Version<uint8_t>(unstructured["version"]);
-        auto minimumVersion = jive::Version<uint8_t>(1, 0, 0);
-
-        if (fileVersion < minimumVersion)
-        {
-            throw std::runtime_error("Incompatible file version");
-        }
 
         return fields::Structure<Pose>(unstructured);
     }
@@ -196,7 +188,7 @@ struct Pose: public PoseTemplate<T>::template Template<pex::Identity>
     std::string Serialize() const
     {
         auto unstructured = fields::Unstructure<nlohmann::json>(*this);
-        unstructured["version"] = Pose::version.ToString();
+
         return unstructured.dump(4);
     }
 

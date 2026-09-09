@@ -35,11 +35,12 @@ struct ReprojectionParameters
 
 
 ReprojectionParameters ToReprojectionParameters(
-    const IntrinsicsMatrix &intrinsics)
+    const IntrinsicsMatrix &intrinsics,
+    distortion::Direction direction)
 {
     return {
         intrinsics,
-        {}};
+        distortion::BrownConradyBase<double>{direction, 0, 0, 0, 0, 0}};
 }
 
 
@@ -133,7 +134,8 @@ Eigen::Matrix<T, 3, 3> GetIntrinsicsMatrix(
 
 
 ReprojectionParameters ToReprojectionParameters(
-    const VectorXd &parameters)
+    const VectorXd &parameters,
+    distortion::Direction direction)
 {
     assert(parameters.size() >= 9);
 
@@ -141,7 +143,7 @@ ReprojectionParameters ToReprojectionParameters(
 
     return {
         intrinsics,
-        {parameters.data() + 4}};
+        {direction, parameters.data() + 4}};
 }
 
 
@@ -187,7 +189,8 @@ Eigen::Matrix<typename Derived::Scalar, 3, 3> GetRotationMatrix(
 
 VectorXd GetInitialParameters(
     const IntrinsicsMatrix &intrinsics,
-    const std::vector<HomographyMatrix> &homographies)
+    const std::vector<HomographyMatrix> &homographies,
+    distortion::Direction direction)
 {
     assert(homographies.size() < std::numeric_limits<Index>::max());
     auto homographyCount = static_cast<Index>(homographies.size());
@@ -201,7 +204,7 @@ VectorXd GetInitialParameters(
 
     // Initial the intrinsics/distortion portion of the parameter vector.
     result.head(cameraParameterCount) =
-        ToVector(ToReprojectionParameters(intrinsics));
+        ToVector(ToReprojectionParameters(intrinsics, direction));
 
     // Initialize the rotation/translation vectors associated with each board
     // view.
@@ -226,10 +229,10 @@ VectorXd GetInitialParameters(
 }
 
 
-class ReprojectionResidual
+class ForwardReprojectionResidual
 {
 public:
-    ReprojectionResidual(
+    ForwardReprojectionResidual(
         const tau::Point2d<double> &observed,
         const tau::Point3d<double> &world)
         :
@@ -262,15 +265,19 @@ public:
         T *residuals) const
     {
         auto intrinsics = GetIntrinsicsMatrix(camera);
-        auto brownConrady = distortion::BrownConrady<T>(camera + 4);
 
-        Eigen::Vector<T, 4> cameraPoint =
+        auto brownConrady =
+            distortion::BrownConrady<T>(
+                distortion::Direction::forward,
+                camera + 4);
+
+        Eigen::Vector<T, 4> trueCameraPoint =
             GetExtrinsics(pose) * this->world_.template cast<T>();
 
-        Eigen::Vector<T, 3> normalizedCameraPoint =
-            cameraPoint.template head<3>() / cameraPoint(2);
+        Eigen::Vector<T, 3> normalizedTrueCameraPoint =
+            trueCameraPoint.template head<3>() / trueCameraPoint(2);
 
-        auto distortedPoint = brownConrady.Apply(normalizedCameraPoint);
+        auto distortedPoint = brownConrady.Apply(normalizedTrueCameraPoint);
 
         Eigen::Vector<T, 3> predicted_pixels = intrinsics * distortedPoint;
 
@@ -287,14 +294,88 @@ private:
 };
 
 
-VectorXd GetReprojectionResiduals(
+class InverseReprojectionResidual
+{
+public:
+    InverseReprojectionResidual(
+        const tau::Point2d<double> &observed,
+        const tau::Point3d<double> &world)
+        :
+        observed_(observed),
+        world_(world.GetHomogeneous())
+    {
+
+    }
+
+    template<typename T>
+    static Eigen::Matrix<T, 4, 4> GetExtrinsics(const T *pose)
+    {
+        Eigen::Matrix<T, 4, 4> result = Eigen::Matrix<T, 4, 4>::Identity();
+
+        // Take the first values of pose as the rotation vector.
+        result.template block<3, 3>(0, 0) =
+            GetRotationMatrix(Eigen::Map<const Eigen::Vector<T, 3>>(pose));
+
+        result.template block<3, 1>(0, 3) =
+            Eigen::Map<const Eigen::Vector<T, 3>>(pose + 3);
+
+        return result;
+    }
+
+    // Let Ceres Solver use its own type for auto differentiation.
+    template<typename T>
+    bool operator()(
+        const T *camera,
+        const T *pose,
+        T *residuals) const
+    {
+        auto intrinsics = GetIntrinsicsMatrix(camera);
+
+        auto intrinsicsAsPixels =
+            ray::IntrinsicsAsPixels<T>::FromArray(intrinsics);
+
+        auto brownConrady =
+            distortion::BrownConrady<T>(
+                distortion::Direction::inverse,
+                camera + 4);
+
+        Eigen::Vector<T, 4> trueCameraPoint =
+            GetExtrinsics(pose) * this->world_.template cast<T>();
+
+        Eigen::Vector<T, 3> normalizedTrueCameraPoint =
+            trueCameraPoint.template head<3>() / trueCameraPoint(2);
+
+        // Normalize the observed point.
+        auto normalizedObservation =
+            intrinsicsAsPixels.ToNormalizedPixel(this->observed_);
+
+        auto correctedPoint =
+            intrinsicsAsPixels.ToSensorPixel(
+                brownConrady.Apply(normalizedObservation));
+
+        Eigen::Vector<T, 3> truePoint = intrinsics * normalizedTrueCameraPoint;
+
+        residuals[0] = correctedPoint.x - truePoint(0);
+        residuals[1] = correctedPoint.y - truePoint(1);
+
+        return true;
+    }
+
+private:
+    // Homogeneous points
+    tau::Point2d<double> observed_;
+    Vector4d world_;
+};
+
+
+VectorXd GetForwardReprojectionResiduals(
     const std::vector<PlanarVertices> &namedVertices,
     const LogicalToMeters &logicalToMeters,
     const VectorXd &parameters,
     double unscale)
 {
     ReprojectionParameters cameraParameters =
-        ToReprojectionParameters(parameters);
+        ToReprojectionParameters(parameters, distortion::Direction::forward);
 
     Index pointCount{};
 
@@ -347,10 +428,76 @@ VectorXd GetReprojectionResiduals(
 }
 
 
-using ReprojectionCostFunction =
+VectorXd GetInverseReprojectionResiduals(
+    const std::vector<PlanarVertices> &namedVertices,
+    const LogicalToMeters &logicalToMeters,
+    const VectorXd &parameters,
+    double unscale)
+{
+    ReprojectionParameters cameraParameters =
+        ToReprojectionParameters(parameters, distortion::Direction::inverse);
+
+    auto intrinsicsAsPixels =
+        ray::IntrinsicsAsPixels<double>::FromArray(cameraParameters.intrinsics);
+
+    auto intrinsicsMatrix = intrinsicsAsPixels.GetArray();
+
+    Index pointCount{};
+
+    for (const auto &vertices: namedVertices)
+    {
+        pointCount += static_cast<Index>(vertices.size());
+    }
+
+    VectorXd result(2 * pointCount);
+    Index row{};
+
+    for (size_t i = 0; i < namedVertices.size(); ++i)
+    {
+        Index offset = cameraParameterCount
+            + (poseParameterCount * static_cast<Index>(i));
+
+        auto rotation = GetRotationMatrix(parameters.segment<3>(offset));
+        auto translation = parameters.segment<3>(offset + 3);
+        const auto &vertices = namedVertices[i];
+
+        for (const auto &vertex: vertices)
+        {
+            // Normalize the observed point.
+            auto normalizedObservation =
+                intrinsicsAsPixels.ToNormalizedPixel(vertex.pixel);
+
+            auto correctedPoint =
+                intrinsicsAsPixels.ToSensorPixel(
+                    cameraParameters.distortion.Apply(normalizedObservation));
+
+            auto planarWorld = logicalToMeters(vertex.logical).ToEigen();
+
+            Eigen::Vector3<double> trueCameraPoint =
+                rotation * planarWorld + translation;
+
+            trueCameraPoint(0) /= trueCameraPoint(2);
+            trueCameraPoint(1) /= trueCameraPoint(2);
+            trueCameraPoint(2) = 1;
+
+            Eigen::Vector<double, 3> truePoint =
+                intrinsicsMatrix * trueCameraPoint;
+
+            result(row++) = correctedPoint.x - truePoint(0);
+            result(row++) = correctedPoint.y - truePoint(1);
+        }
+    }
+
+    // The quantity I want to minimize is geometric error measured in pixels.
+    return result * unscale;
+}
+
+
+template<typename ResidualFunction>
+using CostFunction =
     ceres::AutoDiffCostFunction
     <
-        ReprojectionResidual,
+        ResidualFunction,
 
         // Two residuals
         2,
@@ -361,6 +508,14 @@ using ReprojectionCostFunction =
         // 6 parameters in block 1
         poseParameterCount
     >;
+
+
+
+using ForwardReprojectionCostFunction =
+    CostFunction<ForwardReprojectionResidual>;
+
+using InverseReprojectionCostFunction =
+    CostFunction<InverseReprojectionResidual>;
 
 
 double GetRmsResidual_pixels(
@@ -377,12 +532,62 @@ double GetRmsResidual_pixels(
 }
 
 
+template<typename ResidualFunction>
+void BuildProblem(
+    ceres::Problem &problem,
+    const std::vector<PlanarVertices> &validVertices,
+    VectorXd &parameters,
+    std::shared_ptr<ceres::ParameterBlockOrdering> ordering,
+    const LogicalToMeters &logicalToMeters)
+{
+    using ProblemCostFunction = CostFunction<ResidualFunction>;
+    double *cameraParameters = parameters.data();
+
+    for (size_t i = 0; i < validVertices.size(); ++i)
+    {
+        // pose parameters come after camera parameters.
+        double *poseParameters =
+            cameraParameters + cameraParameterCount + (poseParameterCount * i);
+
+        problem.AddParameterBlock(
+            poseParameters,
+            poseParameterCount);
+
+        ordering->AddElementToGroup(poseParameters, 0);
+
+        for (const auto &vertex: validVertices[i])
+        {
+            auto worldPoint = logicalToMeters(vertex.logical);
+
+            auto residual =
+                std::make_unique<ResidualFunction>(
+                    vertex.pixel,
+                    worldPoint);
+
+            auto costFunction =
+                std::make_unique<ProblemCostFunction>(
+                    residual.release());
+
+            problem.AddResidualBlock(
+                costFunction.release(),
+
+                // We are not using a loss function.
+                nullptr,
+
+                cameraParameters,
+                poseParameters);
+        }
+    }
+}
+
+
 } // end anonymous namespace
 
 
 CalibrationResult<double> Homography::RefineIntrinsics(
     const IntrinsicsMatrix &intrinsics,
-    const std::vector<PlanarVertices> &namedVertices)
+    const std::vector<PlanarVertices> &namedVertices,
+    distortion::Direction direction)
 {
     std::vector<HomographyMatrix> homographies;
     std::vector<PlanarVertices> validVertices;
@@ -437,7 +642,7 @@ CalibrationResult<double> Homography::RefineIntrinsics(
     }
 
     VectorXd parameters =
-        GetInitialParameters(intrinsics, homographies);
+        GetInitialParameters(intrinsics, homographies, direction);
 
     ceres::Problem problem;
 
@@ -452,39 +657,27 @@ CalibrationResult<double> Homography::RefineIntrinsics(
 
     ordering->AddElementToGroup(cameraParameters, 1);
 
-    for (size_t i = 0; i < validVertices.size(); ++i)
+    if (direction == distortion::Direction::forward)
     {
-        double *poseParameters =
-            parameters.data() + cameraParameterCount + (poseParameterCount * i);
-
-        problem.AddParameterBlock(
-            poseParameters,
-            poseParameterCount);
-
-        ordering->AddElementToGroup(poseParameters, 0);
-
-        for (const auto &vertex: validVertices[i])
-        {
-            auto worldPoint = this->logicalToMeters_(vertex.logical);
-
-            auto residual =
-                std::make_unique<ReprojectionResidual>(
-                    vertex.pixel,
-                    worldPoint);
-
-            auto costFunction =
-                std::make_unique<ReprojectionCostFunction>(
-                    residual.release());
-
-            problem.AddResidualBlock(
-                costFunction.release(),
-
-                // We are not using a loss function.
-                nullptr,
-
-                cameraParameters,
-                poseParameters);
-        }
+        BuildProblem<ForwardReprojectionResidual>(
+            problem,
+            validVertices,
+            parameters,
+            ordering,
+            this->logicalToMeters_);
+    }
+    else if (direction == distortion::Direction::inverse)
+    {
+        BuildProblem<InverseReprojectionResidual>(
+            problem,
+            validVertices,
+            parameters,
+            ordering,
+            this->logicalToMeters_);
+    }
+    else
+    {
+        throw std::logic_error("Unknown distortion direction");
     }
 
     ceres::Solver::Options options;
@@ -518,15 +711,31 @@ CalibrationResult<double> Homography::RefineIntrinsics(
         // std::cout << summary.FullReport() << std::endl;
     }
 
-    auto residuals =
-        GetReprojectionResiduals(
-            validVertices,
-            this->logicalToMeters_,
-            parameters,
-            this->normalize_.GetUnscale());
+    VectorXd residuals;
+
+    if (direction == distortion::Direction::forward)
+    {
+        residuals =
+            GetForwardReprojectionResiduals(
+                validVertices,
+                this->logicalToMeters_,
+                parameters,
+                this->normalize_.GetUnscale());
+    }
+    else
+    {
+        assert(direction == distortion::Direction::inverse);
+
+        residuals =
+            GetInverseReprojectionResiduals(
+                validVertices,
+                this->logicalToMeters_,
+                parameters,
+                this->normalize_.GetUnscale());
+    }
 
     auto reprojectionParameters =
-        ToReprojectionParameters(parameters);
+        ToReprojectionParameters(parameters, direction);
 
     return {
         Intrinsics<double>::FromArray_pixels(

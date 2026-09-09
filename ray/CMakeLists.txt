@@ -19,6 +19,7 @@ target_sources(
     ray
     PRIVATE
     camera_parameters.cpp
+    distortion.cpp
     homography.cpp
     homography_settings.cpp
     named_vertex.cpp

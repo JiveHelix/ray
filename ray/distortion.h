@@ -1,6 +1,7 @@
 #pragma once
 
 
+#include <fields/formatter.h>
 #include <pex/group.h>
 #include <ray/intrinsics.h>
 
@@ -13,10 +14,39 @@ namespace distortion
 {
 
 
+
+enum class Direction: int
+{
+    forward = 0,
+    inverse
+};
+
+
+struct DirectionChoices
+{
+    using Type = Direction;
+    static std::vector<Direction> GetChoices();
+};
+
+
+using DirectionSelect = pex::MakeSelect<DirectionChoices>;
+using DirectionModel = pex::ModelSelector<DirectionSelect>;
+using DirectionControl = pex::ControlSelector<DirectionSelect>;
+
+struct DirectionConverter
+{
+    static std::string ToString(Direction direction);
+};
+
+
+std::ostream & operator<<(std::ostream &, Direction);
+
+
 template<typename T>
 struct BrownConradyFields
 {
     static constexpr auto fields = std::make_tuple(
+        fields::Field(&T::direction, "direction"),
         fields::Field(&T::k1, "k1"),
         fields::Field(&T::k2, "k2"),
         fields::Field(&T::p1, "p1"),
@@ -31,6 +61,7 @@ struct BrownConradyTemplate
     template<template<typename> typename T>
     struct Template
     {
+        T<DirectionSelect> direction;
         T<Float> k1;
         T<Float> k2;
         T<Float> p1;
@@ -73,9 +104,10 @@ struct BrownConrady: public BrownConradyBase<T>
 
     }
 
-    BrownConrady(const T *parameters)
+    BrownConrady(Direction direction_, const T *parameters)
         :
         BrownConradyBase<T>{
+            .direction = direction_,
             .k1 = parameters[0],
             .k2 = parameters[1],
             .p1 = parameters[2],
@@ -327,3 +359,33 @@ constexpr T GetNormalizedTolerance(
 
 
 } // end namespace ray
+
+
+template<>
+struct std::formatter<ray::distortion::Direction>
+{
+    constexpr auto parse(std::format_parse_context & context)
+    {
+        return context.begin();
+    }
+
+    template<typename FormatContext>
+    auto format(
+        const ray::distortion::Direction &direction,
+        FormatContext &context) const
+    {
+        return std::format_to(
+            context.out(),
+            "{}",
+            ray::distortion::DirectionConverter::ToString(direction));
+    }
+};
+
+
+template<>
+struct std::formatter<ray::distortion::BrownConrady<double>>
+    : fields::Formatter<ray::distortion::BrownConrady<double>, double> {};
+
+template<>
+struct std::formatter<ray::distortion::BrownConrady<float>>
+    : fields::Formatter<ray::distortion::BrownConrady<float>, float> {};

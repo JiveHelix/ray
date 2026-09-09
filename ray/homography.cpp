@@ -240,7 +240,8 @@ IntrinsicsMatrix Homography::EstimateIntrinsics(
 
 
 CalibrationResult<double> Homography::Calibrate(
-    const std::vector<PlanarVertices> &namedVertices)
+    const std::vector<PlanarVertices> &namedVertices,
+    distortion::Direction direction)
 {
     // Normalize pixel coordinates of all vertices
     std::vector<PlanarVertices> normalizedVertices =
@@ -248,7 +249,7 @@ CalibrationResult<double> Homography::Calibrate(
 
     auto estimated = this->EstimateIntrinsics(normalizedVertices);
 
-    return this->RefineIntrinsics(estimated, normalizedVertices);
+    return this->RefineIntrinsics(estimated, normalizedVertices, direction);
 }
 
 
