@@ -3,7 +3,7 @@ from conan import ConanFile
 
 class RayConan(ConanFile):
     name = "ray"
-    version = "1.0.0"
+    version = "1.0.1"
 
     python_requires = "boiler/0.2"
     python_requires_extend = "boiler.LibraryConanFile"
@@ -21,7 +21,8 @@ class RayConan(ConanFile):
         self.test_requires("catch2/2.13.9")
 
     def requirements(self):
-        self.requires("tau/[~1.15]", transitive_headers=True)
+        self.requires("fields/[>=1.7.1 <2]")
+        self.requires("tau/[>=1.15.1 <2]", transitive_headers=True)
         self.requires("nlohmann_json/[~3]", transitive_headers=True)
 
         self.requires(
