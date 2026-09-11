@@ -1,5 +1,6 @@
 #include <catch2/catch.hpp>
 #include <iostream>
+#include <fields/serialize.h>
 #include <tau/random.h>
 #include <ray/distortion.h>
 #include <ray/intrinsics.h>
@@ -149,4 +150,44 @@ TEST_CASE("Distort/Undistort round trip succeeds", "[distortion]")
             distortion,
             tau::Point2d<double>(uniformRandom(), uniformRandom()));
     }
+}
+
+
+TEST_CASE("Distortion with numeric direction in json", "[distortion]")
+{
+    static constexpr auto testString = R"(
+        {
+            "direction": 1,
+            "k1": 0.17033830279190668,
+            "k2": -0.06492882857243383,
+            "k3": -0.03854759207230837,
+            "p1": -0.0010766094881574997,
+            "p2": 0.000791311604773549
+        }
+    )";
+
+    auto distortion =
+        fields::FromJson<ray::distortion::BrownConrady<double>>(testString);
+
+    REQUIRE(distortion.direction == ray::distortion::Direction::inverse);
+}
+
+
+TEST_CASE("Distortion with string direction in json", "[distortion]")
+{
+    static constexpr auto testString = R"(
+        {
+            "direction": "forward",
+            "k1": 0.17033830279190668,
+            "k2": -0.06492882857243383,
+            "k3": -0.03854759207230837,
+            "p1": -0.0010766094881574997,
+            "p2": 0.000791311604773549
+        }
+    )";
+
+    auto distortion =
+        fields::FromJson<ray::distortion::BrownConrady<double>>(testString);
+
+    REQUIRE(distortion.direction == ray::distortion::Direction::forward);
 }

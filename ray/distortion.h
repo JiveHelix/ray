@@ -4,6 +4,7 @@
 #include <fields/formatter.h>
 #include <pex/group.h>
 #include <ray/intrinsics.h>
+#include <nlohmann/json.hpp>
 
 
 namespace ray
@@ -40,6 +41,10 @@ struct DirectionConverter
 
 
 std::ostream & operator<<(std::ostream &, Direction);
+
+void to_json(nlohmann::json &json, Direction direction);
+
+void from_json(const nlohmann::json &json, Direction &direction);
 
 
 template<typename T>

@@ -3,7 +3,7 @@ from conan import ConanFile
 
 class RayConan(ConanFile):
     name = "ray"
-    version = "1.0.1"
+    version = "1.1.0"
 
     python_requires = "boiler/0.2"
     python_requires_extend = "boiler.LibraryConanFile"
