@@ -453,9 +453,9 @@ using IntrinsicsControl = typename IntrinsicsGroup<T>::DefaultControl;
 
 
 template<>
-struct std::formatter<ray::Intrinsics<double>>
+struct fmt::formatter<ray::Intrinsics<double>>
     : fields::Formatter<ray::Intrinsics<double>> {};
 
 template<>
-struct std::formatter<ray::Intrinsics<float>>
+struct fmt::formatter<ray::Intrinsics<float>>
     : fields::Formatter<ray::Intrinsics<float>> {};

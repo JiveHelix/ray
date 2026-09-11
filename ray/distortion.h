@@ -362,9 +362,9 @@ constexpr T GetNormalizedTolerance(
 
 
 template<>
-struct std::formatter<ray::distortion::Direction>
+struct fmt::formatter<ray::distortion::Direction>
 {
-    constexpr auto parse(std::format_parse_context & context)
+    constexpr auto parse(fmt::format_parse_context & context)
     {
         return context.begin();
     }
@@ -374,7 +374,7 @@ struct std::formatter<ray::distortion::Direction>
         const ray::distortion::Direction &direction,
         FormatContext &context) const
     {
-        return std::format_to(
+        return fmt::format_to(
             context.out(),
             "{}",
             ray::distortion::DirectionConverter::ToString(direction));
@@ -383,9 +383,9 @@ struct std::formatter<ray::distortion::Direction>
 
 
 template<>
-struct std::formatter<ray::distortion::BrownConrady<double>>
+struct fmt::formatter<ray::distortion::BrownConrady<double>>
     : fields::Formatter<ray::distortion::BrownConrady<double>, double> {};
 
 template<>
-struct std::formatter<ray::distortion::BrownConrady<float>>
+struct fmt::formatter<ray::distortion::BrownConrady<float>>
     : fields::Formatter<ray::distortion::BrownConrady<float>, float> {};
