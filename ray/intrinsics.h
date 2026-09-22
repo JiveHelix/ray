@@ -231,7 +231,6 @@ template<typename T>
 using IntrinsicsAsPixelsGroup =
     pex::Group
     <
-        IntrinsicsAsPixelsFields,
         IntrinsicsAsPixelsTemplate<T>::template Template,
         IntrinsicsAsPixelsCustom<T>
     >;
@@ -436,7 +435,6 @@ template<typename T>
 using IntrinsicsGroup =
     pex::Group
     <
-        IntrinsicsFields,
         IntrinsicsTemplate<T>::template Template,
         pex::PlainT<Intrinsics<T>>
     >;

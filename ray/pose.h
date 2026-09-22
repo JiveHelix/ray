@@ -208,7 +208,6 @@ template<typename T>
 using PoseGroup =
     pex::Group
     <
-        PoseFields,
         PoseTemplate<T>::template Template,
         pex::PlainT<Pose<T>>
     >;
@@ -229,7 +228,6 @@ extern template struct Pose<double>;
 
 extern template struct pex::Group
     <
-        ray::PoseFields,
         ray::PoseTemplate<float>::template Template,
         pex::PlainT<ray::Pose<float>>
     >;
@@ -237,7 +235,6 @@ extern template struct pex::Group
 
 extern template struct pex::Group
     <
-        ray::PoseFields,
         ray::PoseTemplate<double>::template Template,
         pex::PlainT<ray::Pose<double>>
     >;

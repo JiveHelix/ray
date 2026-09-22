@@ -54,7 +54,6 @@ template<typename T>
 using LensCalibrationGroup =
     pex::Group
     <
-        LensCalibrationFields,
         LensCalibrationTemplate<T>::template Template,
         pex::PlainT<LensCalibration<T>>
     >;

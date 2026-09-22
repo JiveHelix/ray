@@ -324,7 +324,6 @@ template<typename T>
 using BrownConradyGroup =
     pex::Group
     <
-        BrownConradyFields,
         BrownConradyTemplate<T>::template Template,
         pex::PlainT<BrownConrady<T>>
     >;

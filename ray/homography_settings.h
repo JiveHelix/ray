@@ -60,7 +60,6 @@ DECLARE_OUTPUT_STREAM_OPERATOR(HomographySettings)
 using HomographyGroup =
     pex::Group
     <
-        HomographyFields,
         HomographyTemplate,
         pex::PlainT<HomographySettings>
     >;
@@ -73,7 +72,6 @@ using HomographyControl = typename HomographyGroup::DefaultControl;
 
 extern template struct pex::Group
     <
-        ray::HomographyFields,
         ray::HomographyTemplate,
         pex::PlainT<ray::HomographySettings>
     >;

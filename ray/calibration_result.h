@@ -41,7 +41,6 @@ template<typename Float>
 using CalibrationResultGroup =
     pex::Group
     <
-        CalibrationResultFields,
         CalibrationResultTemplate<Float>::template Template
     >;
 

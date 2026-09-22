@@ -14,7 +14,6 @@ template struct Pose<double>;
 
 template struct pex::Group
     <
-        ray::PoseFields,
         ray::PoseTemplate<float>::template Template,
         pex::PlainT<ray::Pose<float>>
     >;
@@ -22,7 +21,6 @@ template struct pex::Group
 
 template struct pex::Group
     <
-        ray::PoseFields,
         ray::PoseTemplate<double>::template Template,
         pex::PlainT<ray::Pose<double>>
     >;
