@@ -31,8 +31,8 @@ struct DirectionChoices
 
 
 using DirectionSelect = pex::MakeSelect<DirectionChoices>;
-using DirectionModel = pex::ModelSelector<DirectionSelect>;
-using DirectionControl = pex::ControlSelector<DirectionSelect>;
+using DirectionModel = pex::ModelTailor<DirectionSelect>;
+using DirectionControl = pex::ControlTailor<DirectionSelect>;
 
 struct DirectionConverter
 {
