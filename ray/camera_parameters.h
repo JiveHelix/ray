@@ -51,10 +51,6 @@ struct CameraParameters
     Intrinsics<double> intrinsics;
     Pose<double> pose;
 
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&CameraParameters::intrinsics, "intrinsics"),
-        fields::Field(&CameraParameters::pose, "pose"));
-
     static CameraParameters FromMatrix(
         double pixelSize_um,
         const Matrix &matrix);

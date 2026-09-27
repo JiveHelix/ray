@@ -14,13 +14,13 @@ template struct Pose<double>;
 
 template struct pex::Group
     <
-        ray::PoseTemplate<float>::template Template,
+        ray::PoseSchema<float>::template Schema,
         pex::PlainT<ray::Pose<float>>
     >;
 
 
 template struct pex::Group
     <
-        ray::PoseTemplate<double>::template Template,
+        ray::PoseSchema<double>::template Schema,
         pex::PlainT<ray::Pose<double>>
     >;

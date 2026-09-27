@@ -8,29 +8,14 @@ namespace ray
 {
 
 
-template<typename T>
-struct CalibrationResultFields
-{
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&T::lensCalibration, "lensCalibration"),
-
-        fields::Field(
-            &T::rmsReprojectionError_pixels,
-            "rmsReprojectionError_pixels"));
-};
-
-
 template<typename Float>
-struct CalibrationResultTemplate
+struct CalibrationResultSchema
 {
     template<template<typename> typename T>
-    struct Template
+    struct Schema
     {
         T<LensCalibrationGroup<Float>> lensCalibration;
         T<Float> rmsReprojectionError_pixels;
-
-        static constexpr auto fields =
-            CalibrationResultFields<Template>::fields;
 
         static constexpr auto fieldsTypeName = "CalibrationResult";
     };
@@ -41,7 +26,7 @@ template<typename Float>
 using CalibrationResultGroup =
     pex::Group
     <
-        CalibrationResultTemplate<Float>::template Template
+        CalibrationResultSchema<Float>::template Schema
     >;
 
 template<typename Float>

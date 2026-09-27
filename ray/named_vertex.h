@@ -15,10 +15,6 @@ struct NamedVertex
     tau::Point2d<size_t> logical;
     tau::Point2d<double> pixel;
 
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&NamedVertex::logical, "logical"),
-        fields::Field(&NamedVertex::pixel, "pixel"));
-
     static constexpr auto fieldsTypeName = "NamedVertex";
 
     NamedVertex GetNormalized(const ray::NormalizePixel &normalizePixel) const;

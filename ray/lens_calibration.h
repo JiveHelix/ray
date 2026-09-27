@@ -9,26 +9,14 @@ namespace ray
 {
 
 
-template<typename T>
-struct LensCalibrationFields
-{
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&T::intrinsics, "intrinsics"),
-        fields::Field(&T::distortion, "distortion"));
-};
-
-
 template<typename Float>
-struct LensCalibrationTemplate
+struct LensCalibrationSchema
 {
     template<template<typename> typename T>
-    struct Template
+    struct Schema
     {
         T<IntrinsicsGroup<Float>> intrinsics;
         T<distortion::BrownConradyGroup<Float>> distortion;
-
-        static constexpr auto fields =
-            LensCalibrationFields<Template>::fields;
 
         static constexpr auto fieldsTypeName = "LensCalibration";
     };
@@ -37,10 +25,10 @@ struct LensCalibrationTemplate
 
 template<typename T>
 struct LensCalibration:
-    public LensCalibrationTemplate<T>::template Template<pex::Identity>
+    public LensCalibrationSchema<T>::template Schema<pex::Identity>
 {
     using Base =
-        typename LensCalibrationTemplate<T>::template Template<pex::Identity>;
+        typename LensCalibrationSchema<T>::template Schema<pex::Identity>;
 
     template<typename U, typename Style = tau::Round>
     LensCalibration<U> Cast() const
@@ -54,7 +42,7 @@ template<typename T>
 using LensCalibrationGroup =
     pex::Group
     <
-        LensCalibrationTemplate<T>::template Template,
+        LensCalibrationSchema<T>::template Schema,
         pex::PlainT<LensCalibration<T>>
     >;
 

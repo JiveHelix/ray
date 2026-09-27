@@ -47,24 +47,11 @@ void to_json(nlohmann::json &json, Direction direction);
 void from_json(const nlohmann::json &json, Direction &direction);
 
 
-template<typename T>
-struct BrownConradyFields
-{
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&T::direction, "direction"),
-        fields::Field(&T::k1, "k1"),
-        fields::Field(&T::k2, "k2"),
-        fields::Field(&T::p1, "p1"),
-        fields::Field(&T::p2, "p2"),
-        fields::Field(&T::k3, "k3"));
-};
-
-
 template<typename Float>
-struct BrownConradyTemplate
+struct BrownConradySchema
 {
     template<template<typename> typename T>
-    struct Template
+    struct Schema
     {
         T<DirectionSelect> direction;
         T<Float> k1;
@@ -73,9 +60,6 @@ struct BrownConradyTemplate
         T<Float> p2;
         T<Float> k3;
 
-        static constexpr auto fields =
-            BrownConradyFields<Template>::fields;
-
         static constexpr auto fieldsTypeName = "BrownConrady";
     };
 };
@@ -83,7 +67,7 @@ struct BrownConradyTemplate
 
 template<typename Float>
 using BrownConradyBase =
-    BrownConradyTemplate<Float>::template Template<pex::Identity>;
+    BrownConradySchema<Float>::template Schema<pex::Identity>;
 
 
 template<typename T>
@@ -324,7 +308,7 @@ template<typename T>
 using BrownConradyGroup =
     pex::Group
     <
-        BrownConradyTemplate<T>::template Template,
+        BrownConradySchema<T>::template Schema,
         pex::PlainT<BrownConrady<T>>
     >;
 

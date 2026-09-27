@@ -4,6 +4,6 @@
 
 template struct pex::Group
     <
-        ray::HomographyTemplate,
+        ray::HomographySchema,
         pex::PlainT<ray::HomographySettings>
     >;

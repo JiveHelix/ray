@@ -16,25 +16,15 @@ namespace ray
 {
 
 
-template<typename T>
-struct PoseFields
-{
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&T::rotation, "rotation"),
-        fields::Field(&T::point_m, "point_m"));
-};
-
-
 template<typename Float>
-struct PoseTemplate
+struct PoseSchema
 {
     template<template<typename> typename T>
-    struct Template
+    struct Schema
     {
         T<tau::RotationAnglesGroup<Float>> rotation;
         T<tau::Point3dGroup<Float>> point_m;
 
-        static constexpr auto fields = PoseFields<Template>::fields;
         static constexpr auto fieldsTypeName = "Pose";
     };
 };
@@ -67,9 +57,9 @@ using Extrinsic = Eigen::Matrix<T, 4, 4>;
  **
  **/
 template<typename T>
-struct Pose: public PoseTemplate<T>::template Template<pex::Identity>
+struct Pose: public PoseSchema<T>::template Schema<pex::Identity>
 {
-    using Base = typename PoseTemplate<T>::template Template<pex::Identity>;
+    using Base = typename PoseSchema<T>::template Schema<pex::Identity>;
 
     Pose()
         :
@@ -208,7 +198,7 @@ template<typename T>
 using PoseGroup =
     pex::Group
     <
-        PoseTemplate<T>::template Template,
+        PoseSchema<T>::template Schema,
         pex::PlainT<Pose<T>>
     >;
 
@@ -228,13 +218,13 @@ extern template struct Pose<double>;
 
 extern template struct pex::Group
     <
-        ray::PoseTemplate<float>::template Template,
+        ray::PoseSchema<float>::template Schema,
         pex::PlainT<ray::Pose<float>>
     >;
 
 
 extern template struct pex::Group
     <
-        ray::PoseTemplate<double>::template Template,
+        ray::PoseSchema<double>::template Schema,
         pex::PlainT<ray::Pose<double>>
     >;

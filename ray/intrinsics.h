@@ -99,24 +99,11 @@ public:
 };
 
 
-template<typename T>
-struct IntrinsicsFields
-{
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&T::pixelSize_um, "pixelSize_um"),
-        fields::Field(&T::focalLengthX_mm, "focalLengthX_mm"),
-        fields::Field(&T::focalLengthY_mm, "focalLengthY_mm"),
-        fields::Field(&T::principalX_pixels, "principalX_pixels"),
-        fields::Field(&T::principalY_pixels, "principalY_pixels"),
-        fields::Field(&T::skew_pixels, "skew_pixels", "skew"));
-};
-
-
 template<typename Float>
-struct IntrinsicsTemplate
+struct IntrinsicsSchema
 {
     template<template<typename> typename T>
-    struct Template
+    struct Schema
     {
         T<Float> pixelSize_um;
         T<Float> focalLengthX_mm;
@@ -125,31 +112,16 @@ struct IntrinsicsTemplate
         T<Float> principalY_pixels;
         T<Float> skew_pixels;
 
-        static constexpr auto fields =
-            IntrinsicsFields<Template>::fields;
-
         static constexpr auto fieldsTypeName = "Intrinsics";
     };
 };
 
 
-template<typename T>
-struct IntrinsicsAsPixelsFields
-{
-    static constexpr auto fields = std::make_tuple(
-        fields::Field(&T::focalLengthX, "focalLengthX"),
-        fields::Field(&T::focalLengthY, "focalLengthY"),
-        fields::Field(&T::principalX, "principalX"),
-        fields::Field(&T::principalY, "principalY"),
-        fields::Field(&T::skew, "skew"));
-};
-
-
 template<typename Float>
-struct IntrinsicsAsPixelsTemplate
+struct IntrinsicsAsPixelsSchema
 {
     template<template<typename> typename T>
-    struct Template
+    struct Schema
     {
         T<Float> focalLengthX;
         T<Float> focalLengthY;
@@ -157,16 +129,13 @@ struct IntrinsicsAsPixelsTemplate
         T<Float> principalY;
         T<Float> skew;
 
-        static constexpr auto fields =
-            IntrinsicsAsPixelsFields<Template>::fields;
-
         static constexpr auto fieldsTypeName = "IntrinsicsAsPixels";
     };
 };
 
 
 template<typename Float>
-struct IntrinsicsAsPixelsCustom
+struct IntrinsicsAsPixelsFinisher
 {
     template<typename Base>
     struct Plain: public Base
@@ -190,10 +159,10 @@ struct IntrinsicsAsPixelsCustom
         template<typename U, typename Style = tau::Round>
         auto Cast() const
         {
-            using Result = IntrinsicsAsPixelsCustom<U>::template Plain
+            using Result = IntrinsicsAsPixelsFinisher<U>::template Plain
                 <
-                    typename IntrinsicsAsPixelsTemplate<U>
-                        ::template Template<pex::Identity>
+                    typename IntrinsicsAsPixelsSchema<U>
+                        ::template Schema<pex::Identity>
                 >;
 
             return tau::CastFields<Result, U, Style>(*this);
@@ -231,8 +200,8 @@ template<typename T>
 using IntrinsicsAsPixelsGroup =
     pex::Group
     <
-        IntrinsicsAsPixelsTemplate<T>::template Template,
-        IntrinsicsAsPixelsCustom<T>
+        IntrinsicsAsPixelsSchema<T>::template Schema,
+        IntrinsicsAsPixelsFinisher<T>
     >;
 
 template<typename T>
@@ -247,10 +216,10 @@ DECLARE_EQUALITY_OPERATORS(IntrinsicsAsPixels<double>)
 
 template<typename T>
 struct Intrinsics:
-    public IntrinsicsTemplate<T>::template Template<pex::Identity>
+    public IntrinsicsSchema<T>::template Schema<pex::Identity>
 {
     using Base =
-        typename IntrinsicsTemplate<T>::template Template<pex::Identity>;
+        typename IntrinsicsSchema<T>::template Schema<pex::Identity>;
 
     static constexpr auto millimetersPerMeter = static_cast<T>(1e3);
 
@@ -435,7 +404,7 @@ template<typename T>
 using IntrinsicsGroup =
     pex::Group
     <
-        IntrinsicsTemplate<T>::template Template,
+        IntrinsicsSchema<T>::template Schema,
         pex::PlainT<Intrinsics<T>>
     >;
 
