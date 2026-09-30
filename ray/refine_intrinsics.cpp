@@ -414,7 +414,7 @@ VectorXd GetForwardReprojectionResiduals(
             Vector3d predicted =
                 cameraParameters.intrinsics * distorted.GetHomogeneous();
 
-            auto residual =
+            Eigen::Array2d residual =
                 predicted.template head<2>().array()
                 - vertex.pixel.ToEigen().array();
 
