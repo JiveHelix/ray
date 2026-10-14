@@ -67,7 +67,7 @@ struct BrownConradySchema
 
 template<typename Float>
 using BrownConradyBase =
-    BrownConradySchema<Float>::template Schema<pex::Identity>;
+    typename BrownConradySchema<Float>::template Schema<pex::Identity>;
 
 
 template<typename T>

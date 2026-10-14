@@ -159,7 +159,8 @@ struct IntrinsicsAsPixelsFinisher
         template<typename U, typename Style = tau::Round>
         auto Cast() const
         {
-            using Result = IntrinsicsAsPixelsFinisher<U>::template Plain
+            using Result =
+                typename IntrinsicsAsPixelsFinisher<U>::template Plain
                 <
                     typename IntrinsicsAsPixelsSchema<U>
                         ::template Schema<pex::Identity>
@@ -205,7 +206,7 @@ using IntrinsicsAsPixelsGroup =
     >;
 
 template<typename T>
-using IntrinsicsAsPixels = IntrinsicsAsPixelsGroup<T>::Plain;
+using IntrinsicsAsPixels = typename IntrinsicsAsPixelsGroup<T>::Plain;
 
 DECLARE_OUTPUT_STREAM_OPERATOR(IntrinsicsAsPixels<float>)
 DECLARE_OUTPUT_STREAM_OPERATOR(IntrinsicsAsPixels<double>)
